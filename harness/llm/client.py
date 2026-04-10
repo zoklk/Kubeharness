@@ -32,6 +32,8 @@ def chat(
         return _chat_anthropic(cfg, messages, tools, response_format)
     elif provider == "openai_compat":
         return _chat_openai_compat(cfg, messages, tools, response_format)
+    elif provider == "gemini":
+        return _chat_gemini(cfg, messages, tools, response_format)
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
@@ -141,16 +143,89 @@ def _chat_openai_compat(
     return {"content": content, "tool_calls": tool_calls, "raw": raw}
 
 
+def _chat_gemini(
+    cfg: dict,
+    messages: list[dict],
+    tools: list[dict] | None,
+    response_format: dict | None,
+) -> dict:
+    from google import genai
+    from google.genai import types
+
+    api_key = os.environ.get(cfg.get("api_key_env", "GEMINI_API_KEY"))
+    if not api_key:
+        raise EnvironmentError(f"Environment variable {cfg['api_key_env']} is not set")
+
+    client = genai.Client(api_key=api_key)
+    model = cfg.get("model", "gemini-2.0-flash")
+    temperature = cfg.get("temperature", 0.1)
+
+    # system 메시지 분리
+    system = None
+    contents = []
+    for m in messages:
+        if m["role"] == "system":
+            system = m["content"]
+        else:
+            role = "user" if m["role"] == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part(text=m["content"])]))
+
+    # tools 변환: {"name", "description", "input_schema" or "parameters"} → FunctionDeclaration
+    gemini_tools = None
+    if tools:
+        declarations = []
+        for t in tools:
+            schema = t.get("input_schema") or t.get("parameters") or {}
+            declarations.append(types.FunctionDeclaration(
+                name=t["name"],
+                description=t.get("description", ""),
+                parameters=schema,
+            ))
+        gemini_tools = [types.Tool(function_declarations=declarations)]
+
+    gen_config = types.GenerateContentConfig(
+        temperature=temperature,
+        system_instruction=system,
+        tools=gemini_tools,
+    )
+
+    raw = _retry(lambda: client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=gen_config,
+    ))
+
+    content = ""
+    tool_calls = None
+
+    for part in raw.candidates[0].content.parts:
+        if hasattr(part, "text") and part.text:
+            content = part.text
+        elif hasattr(part, "function_call") and part.function_call:
+            if tool_calls is None:
+                tool_calls = []
+            fc = part.function_call
+            tool_calls.append({
+                "id": fc.id if hasattr(fc, "id") else fc.name,
+                "name": fc.name,
+                "input": dict(fc.args),
+            })
+
+    return {"content": content, "tool_calls": tool_calls, "raw": raw}
+
+
 def _retry(fn, max_attempts: int = 3):
     """네트워크 에러만 재시도. JSON 파싱 실패 등 로직 에러는 즉시 raise."""
     import anthropic
     from openai import APIConnectionError, APITimeoutError
+    from google.genai.errors import ServerError as GeminiServerError
 
     retryable = (
         anthropic.APIConnectionError,
         anthropic.APITimeoutError,
         APIConnectionError,
         APITimeoutError,
+        GeminiServerError,
     )
     delay = 1.0
     for attempt in range(max_attempts):
