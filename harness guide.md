@@ -311,51 +311,43 @@ def chat(
 
 ### Step 4: kagent MCP 클라이언트 (`harness/mcp/kagent_client.py`)
 
-연구실 클러스터에 kagent를 설치하면 `kagent-tool-server` MCP server가 자동으로 뜸. 이 서버에 HTTP/JSON-RPC로 연결.
+연구실 클러스터에 kagent를 설치하면 `kagent-tool-server` MCP server가 자동으로 뜸. 이 서버에 Streamable HTTP로 연결.
 
 **권장 구현 방식**: `langchain-mcp-adapters` 패키지 사용. kagent MCP server의 모든 tool을 LangChain tool로 자동 변환:
 
 ```python
+import yaml
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-async def get_kagent_tools(allowed_names: list[str] | None = None):
-    client = MultiServerMCPClient({
+with open("config/kagent.yaml") as f:
+    config = yaml.safe_load(f)
+
+async def get_kagent_tools(role: str) -> list:
+    """
+    role: "developer_tools" | "runtime_verifier_tools"
+    """
+    allowed_names = config[role]
+    async with MultiServerMCPClient({
         "kagent": {
-            "url": "<config/kagent.yaml의 url>",
+            "url": config["url"],
             "transport": "streamable_http",
         }
-    })
-    tools = await client.get_tools()
-    if allowed_names is not None:
-        tools = [t for t in tools if t.name in allowed_names]
-    return tools
+    }) as client:
+        all_tools = await client.get_tools()
+        return [t for t in all_tools if t.name in allowed_names]
 ```
 
-**Tool 화이트리스트** (`config/kagent.yaml`):
+`MultiServerMCPClient`는 반드시 `async with`로 사용해야 한다. 직접 인스턴스화 후 `get_tools()`를 호출하면 MCP `initialize` 핸드셰이크가 누락되어 서버가 요청을 거부한다.
 
-```yaml
-url: http://kagent-tool-server.kagent.svc.cluster.local:80/mcp
-readonly_tools:
-  - k8s_get_resources
-  - k8s_get_pod_logs
-  - k8s_get_events
-  - k8s_get_resource_yaml
-  - k8s_describe_resource
-  - k8s_get_available_api_resources
-  - k8s_get_cluster_configuration
-  # helm read tool 등 추가
-```
+**Tool 화이트리스트**는 `config/kagent.yaml`에 정의한다. 배포/적용 작업은 `harness/tools/helm.py`에서 정적으로 처리하므로 LLM에게는 읽기 전용 tool만 노출한다. 노출되지 않은 tool은 LLM이 호출할 수 없다.
 
-**Developer와 Runtime Verifier(Phase 2) 모두 readonly_tools만 사용**. 쓰기 tool은 절대 노출 금지. 노출 안 된 tool은 LLM이 호출 못 함.
-
-**사전 확인 필요**: kagent 설치 후 실제 tool 목록을 다음 명령으로 확인:
+**사전 확인 필요**: kagent 설치 후 실제 tool 목록은 다음으로 확인:
 ```bash
-kubectl port-forward -n kagent svc/kagent-tool-server 8080:80
-curl -X POST http://localhost:8080/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"tools/list","id":1}'
+kubectl get RemoteMCPServer kagent-tool-server -n kagent -o yaml
+# status.discoveredTools 필드에 전체 목록 나열됨
 ```
-응답에서 readonly tool 이름을 골라 yaml에 채움.
+노출되지 않은 tool은 LLM이 호출할 수 없다.
+
 
 ### Step 5: 정적 검증 함수 (`harness/verifiers/static.py`)
 

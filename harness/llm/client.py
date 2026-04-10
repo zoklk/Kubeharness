@@ -55,11 +55,35 @@ def _chat_anthropic(
     temperature = cfg.get("temperature", 0.1)
 
     # system 메시지 분리 (Anthropic API는 system을 별도 파라미터로)
+    # 지원 role: system / user / assistant / tool
+    #   assistant: tool_calls 포함 가능 (multi-turn)
+    #   tool: {"role":"tool","tool_call_id":"...","name":"...","content":"..."}
     system = None
     user_messages = []
     for m in messages:
         if m["role"] == "system":
             system = m["content"]
+        elif m["role"] == "assistant":
+            parts: list[Any] = []
+            if m.get("content"):
+                parts.append({"type": "text", "text": m["content"]})
+            for tc in (m.get("tool_calls") or []):
+                parts.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": tc["input"],
+                })
+            user_messages.append({"role": "assistant", "content": parts or m.get("content", "")})
+        elif m["role"] == "tool":
+            user_messages.append({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m["tool_call_id"],
+                    "content": m["content"],
+                }],
+            })
         else:
             user_messages.append(m)
 
@@ -72,12 +96,13 @@ def _chat_anthropic(
     if system:
         kwargs["system"] = system
     if tools:
-        kwargs["tools"] = tools
+        kwargs["tools"] = [
+            {"name": t["name"], "description": t.get("description", ""), "input_schema": t["input_schema"]}
+            for t in tools
+        ]
 
-    # JSON schema 강제: Anthropic은 response_format 미지원 → 프롬프트에 위임 (호출자 책임)
-    # response_format은 openai_compat용으로만 활용
-
-    raw = _retry(lambda: client.messages.create(**kwargs))
+    retryable = (anthropic.APIConnectionError, anthropic.APITimeoutError)
+    raw = _retry(lambda: client.messages.create(**kwargs), retryable)
 
     content = ""
     tool_calls = None
@@ -120,25 +145,39 @@ def _chat_openai_compat(
         "messages": messages,
     }
     if tools:
-        kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
+        kwargs["tools"] = [
+            {"type": "function", "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t["parameters"],
+            }}
+            for t in tools
+        ]
     if response_format:
         kwargs["response_format"] = response_format
 
-    raw = _retry(lambda: client.chat.completions.create(**kwargs))
+    from openai import APIConnectionError, APITimeoutError
+    retryable = (APIConnectionError, APITimeoutError)
+    raw = _retry(lambda: client.chat.completions.create(**kwargs), retryable)
 
     msg = raw.choices[0].message
     content = msg.content or ""
     tool_calls = None
     if msg.tool_calls:
         import json
-        tool_calls = [
-            {
+        tool_calls = []
+        for tc in msg.tool_calls:
+            # 안전한 JSON 파싱 (빈 문자열이면 {} 반환)
+            try:
+                args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+            except json.JSONDecodeError:
+                args = {} # 모델이 잘못된 JSON을 뱉었을 경우
+
+            tool_calls.append({
                 "id": tc.id,
                 "name": tc.function.name,
-                "input": json.loads(tc.function.arguments),
-            }
-            for tc in msg.tool_calls
-        ]
+                "input": args,
+            })
 
     return {"content": content, "tool_calls": tool_calls, "raw": raw}
 
@@ -161,13 +200,44 @@ def _chat_gemini(
     temperature = cfg.get("temperature", 0.1)
 
     # system 메시지 분리
+    # 지원 role: system / user / assistant / tool
+    #   assistant: tool_calls 포함 가능 (multi-turn)
+    #   tool: {"role":"tool","tool_call_id":"...","name":"...","content":"..."}
     system = None
     contents = []
     for m in messages:
         if m["role"] == "system":
             system = m["content"]
+        elif m["role"] == "assistant":
+            # thinking 모델은 thought_signature가 있는 raw content를 그대로 사용해야 함
+            if "_gemini_raw_content" in m:
+                contents.append(m["_gemini_raw_content"])
+            else:
+                parts = []
+                if m.get("content"):
+                    parts.append(types.Part(text=m["content"]))
+                for tc in (m.get("tool_calls") or []):
+                    parts.append(types.Part(
+                        function_call=types.FunctionCall(
+                            id=tc["id"],
+                            name=tc["name"],
+                            args=tc["input"],
+                        )
+                    ))
+                contents.append(types.Content(role="model", parts=parts))
+        elif m["role"] == "tool":
+            contents.append(types.Content(
+                role="user",
+                parts=[types.Part(
+                    function_response=types.FunctionResponse(
+                        id=m["tool_call_id"],
+                        name=m["name"],
+                        response={"result": m["content"]},
+                    )
+                )],
+            ))
         else:
-            role = "user" if m["role"] == "user" else "model"
+            role = "user"
             contents.append(types.Content(role=role, parts=[types.Part(text=m["content"])]))
 
     # tools 변환: {"name", "description", "input_schema" or "parameters"} → FunctionDeclaration
@@ -189,18 +259,20 @@ def _chat_gemini(
         tools=gemini_tools,
     )
 
+    from google.genai.errors import ServerError as GeminiServerError
+    retryable = (GeminiServerError,)
     raw = _retry(lambda: client.models.generate_content(
         model=model,
         contents=contents,
         config=gen_config,
-    ))
+    ), retryable)
 
     content = ""
     tool_calls = None
 
     for part in raw.candidates[0].content.parts:
         if hasattr(part, "text") and part.text:
-            content = part.text
+            content += part.text
         elif hasattr(part, "function_call") and part.function_call:
             if tool_calls is None:
                 tool_calls = []
@@ -211,27 +283,21 @@ def _chat_gemini(
                 "input": dict(fc.args),
             })
 
-    return {"content": content, "tool_calls": tool_calls, "raw": raw}
+    return {
+        "content": content,
+        "tool_calls": tool_calls,
+        "raw": raw,
+        "_gemini_raw_content": raw.candidates[0].content,
+    }
 
 
-def _retry(fn, max_attempts: int = 3):
+def _retry(fn, retryable: tuple, max_attempts: int = 3):
     """네트워크 에러만 재시도. JSON 파싱 실패 등 로직 에러는 즉시 raise."""
-    import anthropic
-    from openai import APIConnectionError, APITimeoutError
-    from google.genai.errors import ServerError as GeminiServerError
-
-    retryable = (
-        anthropic.APIConnectionError,
-        anthropic.APITimeoutError,
-        APIConnectionError,
-        APITimeoutError,
-        GeminiServerError,
-    )
     delay = 1.0
     for attempt in range(max_attempts):
         try:
             return fn()
-        except retryable as e:
+        except retryable:
             if attempt == max_attempts - 1:
                 raise
             time.sleep(delay)
