@@ -1,0 +1,39 @@
+# 하네스에서 사용하는 외부 CLI 툴 버전 명세
+# 재구성 시 scripts/install_tools.sh 참고
+
+cli:
+  kubectl:
+    version: "1.34.3"
+    install: "https://kubernetes.io/docs/tasks/tools/install-kubectl-linux/"
+
+  helm:
+    version: "3.19.5"
+    install: "https://helm.sh/docs/intro/install/"
+
+  kubeconform:
+    version: "0.7.0"
+    install_path: "~/.local/bin/kubeconform"
+    github: "https://github.com/yannh/kubeconform/releases"
+
+  trivy:
+    version: "0.69.3"
+    install_path: "~/.local/bin/trivy"
+    github: "https://github.com/aquasecurity/trivy/releases"
+
+  gitleaks:
+    version: "8.24.3"
+    install_path: "~/.local/bin/gitleaks"
+    github: "https://github.com/gitleaks/gitleaks/releases"
+
+  yamllint:
+    version: "1.38.0"
+    install: "pip (venv)"  # pyproject.toml 의존성으로 관리
+
+python:
+  runtime: "3.12.3"
+  packages:
+    google-genai: "1.72.0"
+    langchain-mcp-adapters: "0.2.2"
+    anthropic: "0.93.0"
+    openai: "2.31.0"
+  # 전체 패키지 목록은 pyproject.toml 참고
