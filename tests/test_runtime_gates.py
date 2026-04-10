@@ -39,10 +39,8 @@ def _warning_event(msg="crash", reason="OOMKilled", obj="myapp-xxx",
 
 # ── 전체 성공 경로 ─────────────────────────────────────────────────────────────
 
-def test_all_pass_no_smoke(tmp_path, monkeypatch):
+def test_all_pass_no_smoke():
     """smoke test 없을 때 4개 체크 중 3개 pass + smoke skip."""
-    monkeypatch.chdir(tmp_path)  # edge-server/scripts가 없는 경로
-
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()) as m_wait,
@@ -62,7 +60,7 @@ def test_all_pass_no_smoke(tmp_path, monkeypatch):
         f"{SERVICE}-dev-v1",
         f"edge-server/helm/{SERVICE}",
         "gikview",
-        [],  # values 파일 없음 (tmp_path에 없으니)
+        [],  # 실제 프로젝트에 edge-server/helm/myapp/values.yaml 없음
     )
     m_wait.assert_called_once_with(
         "pods", "Ready", "gikview",
@@ -77,7 +75,7 @@ def test_all_pass_no_smoke(tmp_path, monkeypatch):
 
 def test_all_pass_with_smoke(tmp_path, monkeypatch):
     """smoke test 스크립트가 존재하고 통과하면 passed=True."""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     smoke_dir = tmp_path / "edge-server" / "scripts"
     smoke_dir.mkdir(parents=True)
     (smoke_dir / f"smoke-test-{SERVICE}.sh").write_text("exit 0")
@@ -93,7 +91,6 @@ def test_all_pass_with_smoke(tmp_path, monkeypatch):
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["smoke_test"] == "pass"
-    # bash <smoke_script> 호출 확인
     args = m_smoke.call_args[0][0]
     assert args[0] == "bash"
     assert f"smoke-test-{SERVICE}.sh" in args[1]
@@ -101,10 +98,8 @@ def test_all_pass_with_smoke(tmp_path, monkeypatch):
 
 # ── helm_install fail ─────────────────────────────────────────────────────────
 
-def test_helm_fail_skips_rest(tmp_path, monkeypatch):
+def test_helm_fail_skips_rest():
     """helm install 실패 시 나머지 3개 skip, passed=False."""
-    monkeypatch.chdir(tmp_path)
-
     with patch("harness.tools.helm.upgrade_install", return_value=_fail("immutable field")):
         result = run_runtime_phase1(SERVICE)
 
@@ -120,9 +115,7 @@ def test_helm_fail_skips_rest(tmp_path, monkeypatch):
 
 # ── kubectl_wait fail ─────────────────────────────────────────────────────────
 
-def test_kubectl_wait_fail(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-
+def test_kubectl_wait_fail():
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
@@ -138,9 +131,8 @@ def test_kubectl_wait_fail(tmp_path, monkeypatch):
 
 # ── kubectl_events: warning 있음 ──────────────────────────────────────────────
 
-def test_events_warning_recent_fail(tmp_path, monkeypatch):
+def test_events_warning_recent_fail():
     """최근 1분 내 warning → fail."""
-    monkeypatch.chdir(tmp_path)
     ev = _warning_event(minutes_ago=1.0)
 
     with (
@@ -158,9 +150,8 @@ def test_events_warning_recent_fail(tmp_path, monkeypatch):
     assert result["checks"][-1]["status"] == "skip"
 
 
-def test_events_warning_old_pass(tmp_path, monkeypatch):
+def test_events_warning_old_pass():
     """10분 전 warning은 무시 → pass."""
-    monkeypatch.chdir(tmp_path)
     ev = _warning_event(minutes_ago=10.0)
 
     with (
@@ -177,7 +168,7 @@ def test_events_warning_old_pass(tmp_path, monkeypatch):
 # ── smoke_test fail ───────────────────────────────────────────────────────────
 
 def test_smoke_fail(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     smoke_dir = tmp_path / "edge-server" / "scripts"
     smoke_dir.mkdir(parents=True)
     (smoke_dir / f"smoke-test-{SERVICE}.sh").write_text("exit 1")
@@ -199,7 +190,7 @@ def test_smoke_fail(tmp_path, monkeypatch):
 
 def test_values_files_included_when_present(tmp_path, monkeypatch):
     """values.yaml, values-dev.yaml 모두 존재 시 둘 다 전달."""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     chart_dir = tmp_path / "edge-server" / "helm" / SERVICE
     chart_dir.mkdir(parents=True)
     (chart_dir / "values.yaml").write_text("replicas: 1")
@@ -219,7 +210,7 @@ def test_values_files_included_when_present(tmp_path, monkeypatch):
 
 def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
     """values-dev.yaml 없으면 values.yaml만 전달."""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     chart_dir = tmp_path / "edge-server" / "helm" / SERVICE
     chart_dir.mkdir(parents=True)
     (chart_dir / "values.yaml").write_text("replicas: 1")
@@ -239,8 +230,7 @@ def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
 
 # ── log_dir 저장 확인 ─────────────────────────────────────────────────────────
 
-def test_log_dir_saved(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_log_dir_saved(tmp_path):
     log_dir = str(tmp_path / "logs")
 
     with (

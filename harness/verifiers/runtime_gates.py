@@ -21,6 +21,9 @@ from harness.tools import helm, kubectl, shell
 
 NAMESPACE = "gikview"
 
+# 프로젝트 루트: harness/verifiers/ → harness/ → GikView/
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
@@ -102,13 +105,13 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
     label_selector = f"app.kubernetes.io/name={service_name}"
     smoke_test_path = Path(f"edge-server/scripts/smoke-test-{service_name}.sh")
 
-    # values.yaml 필수, values-dev.yaml 있으면 포함
+    # values.yaml 필수, values-dev.yaml 있으면 포함 (PROJECT_ROOT 기준으로 확인)
     values_files = [
         vf for vf in [
             f"{chart_path}/values.yaml",
             f"{chart_path}/values-dev.yaml",
         ]
-        if Path(vf).exists()
+        if (PROJECT_ROOT / vf).exists()
     ]
 
     checks = []
@@ -136,8 +139,8 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
         checks.append(_skip("smoke_test"))
         return {"passed": False, "checks": checks}
 
-    # ④ smoke test (존재 시)
-    if smoke_test_path.exists():
+    # ④ smoke test (PROJECT_ROOT 기준으로 확인)
+    if (PROJECT_ROOT / smoke_test_path).exists():
         r = shell.run(["bash", str(smoke_test_path)])
         checks.append(_from_run("smoke_test", r, log_dir))
         if checks[-1]["status"] == "fail":
