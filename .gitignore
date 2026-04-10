@@ -1,0 +1,28 @@
+# 환경 / 시크릿
+.env
+
+# Python 가상환경
+.venv/
+
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 빌드 산출물
+dist/
+build/
+*.egg-info/
+*.egg
+
+# 테스트 / 린터 캐시
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 런타임 로그 (구조는 유지, 내용은 제외)
+logs/raw/*
+!logs/raw/.gitkeep
