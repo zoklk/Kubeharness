@@ -41,6 +41,10 @@ def _values_files(chart_path: str) -> list[str]:
     ]
 
 
+def _docker_dir(service_name: str) -> str:
+    return str(PROJECT_ROOT / f"edge-server/docker/{service_name}")
+
+
 def _has_helm(files: list[str], service_name: str) -> bool:
     # files는 edge-server/ 상대 경로이므로 prefix 검사도 상대 경로로
     prefix = f"edge-server/helm/{service_name}/"
@@ -50,6 +54,15 @@ def _has_helm(files: list[str], service_name: str) -> bool:
 def _has_manifests(files: list[str], service_name: str) -> bool:
     prefix = f"edge-server/manifests/{service_name}/"
     return any(f.startswith(prefix) for f in files)
+
+
+def _has_docker(files: list[str], service_name: str) -> bool:
+    prefix = f"edge-server/docker/{service_name}/"
+    return any(f.startswith(prefix) for f in files)
+
+
+def _has_ebpf(files: list[str]) -> bool:
+    return any(f.startswith("edge-server/ebpf/") for f in files)
 
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
@@ -101,12 +114,28 @@ def static_verifier_node(state: HarnessState) -> dict:
         checks.append(static.check_kubectl_dry_run_server(
             manifest_dir, NAMESPACE, log_dir=log_dir))
 
-    # ④ 어느 쪽도 없으면 fail
-    if not _has_helm(files, service_name) and not _has_manifests(files, service_name):
+    # ④ custom image 체크 (Dockerfile)
+    if _has_docker(files, service_name):
+        checks.append(static.check_dockerfile(_docker_dir(service_name), log_dir=log_dir))
+        checks.append(static.check_gitleaks(_docker_dir(service_name), log_dir=log_dir))
+
+    # ⑤ eBPF 소스 — 정적 도구 체크 없음 (빌드/연결은 사람이 직접 관리)
+    #    artifact_detection 통과 목적으로만 감지
+
+    # ⑥ 인식된 아티팩트가 없으면 fail
+    if not any([
+        _has_helm(files, service_name),
+        _has_manifests(files, service_name),
+        _has_docker(files, service_name),
+        _has_ebpf(files),
+    ]):
         checks.append({
             "name": "artifact_detection",
             "status": "fail",
-            "detail": f"No helm chart or manifests found for service '{service_name}' in dev_artifacts",
+            "detail": (
+                f"No helm chart, manifests, Dockerfile, or eBPF source "
+                f"found for service '{service_name}' in dev_artifacts"
+            ),
             "log_path": None,
         })
 

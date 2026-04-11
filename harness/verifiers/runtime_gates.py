@@ -13,6 +13,7 @@ run_runtime_phase1(service_name) -> {"passed": bool, "checks": [...]}
 """
 
 import json
+import yaml
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,7 @@ NAMESPACE = "gikview"
 
 # 프로젝트 루트: harness/verifiers/ → harness/ → GikView/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -46,6 +48,43 @@ def _from_run(name: str, r: dict, log_dir: Optional[str]) -> dict:
     status = "pass" if r["exit_code"] == 0 else "fail"
     detail = (r["stderr"] or r["stdout"]).strip() or "OK"
     return _result(name, status, detail, log_dir, r["stdout"] + r["stderr"])
+
+
+# ── 빌드 설정 ─────────────────────────────────────────────────────────────────
+
+def _load_build_config() -> dict:
+    if _BUILD_CONFIG_PATH.exists():
+        return yaml.safe_load(_BUILD_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    return {}
+
+
+# ── Docker 빌드 ────────────────────────────────────────────────────────────────
+
+def _run_docker_build(
+    service_name: str,
+    registry: str,
+    image_tag: str,
+    log_dir: Optional[str] = None,
+) -> list[dict]:
+    """
+    Dockerfile이 있을 때 build + push 실행.
+    반환: [docker_build 체크, docker_push 체크] — 순서대로 실행, fail 시 이후 skip.
+    Dockerfile 없으면 빈 리스트 반환 (skip 없음, 해당 서비스에 불필요한 스텝).
+    """
+    docker_dir = PROJECT_ROOT / f"edge-server/docker/{service_name}"
+    if not (docker_dir / "Dockerfile").exists():
+        return []
+
+    tag = f"{registry}/{service_name}:{image_tag}"
+
+    r = shell.run(["docker", "build", "-t", tag, str(docker_dir)])
+    build_check = _from_run("docker_build", r, log_dir)
+    if build_check["status"] == "fail":
+        return [build_check, _skip("docker_push")]
+
+    r = shell.run(["docker", "push", tag])
+    push_check = _from_run("docker_push", r, log_dir)
+    return [build_check, push_check]
 
 
 # ── 이벤트 파싱 ───────────────────────────────────────────────────────────────
@@ -114,7 +153,29 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
 
     checks = []
 
-    # ① helm upgrade --install
+    # ① docker build + push (Dockerfile 존재 시)
+    build_cfg = _load_build_config()
+    registry = build_cfg.get("registry", "")
+    image_tag = build_cfg.get("image_tag", "dev")
+
+    if not registry and (PROJECT_ROOT / f"edge-server/docker/{service_name}" / "Dockerfile").exists():
+        checks.append(_result(
+            "docker_build", "fail",
+            "config/build.yaml missing or 'registry' not set",
+            log_dir,
+        ))
+        checks += [_skip("docker_push"), _skip("helm_install"),
+                   _skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
+        return {"passed": False, "checks": checks}
+
+    docker_checks = _run_docker_build(service_name, registry, image_tag, log_dir)
+    checks.extend(docker_checks)
+    if docker_checks and docker_checks[-1]["status"] == "fail":
+        checks += [_skip("helm_install"), _skip("kubectl_wait"),
+                   _skip("kubectl_events"), _skip("smoke_test")]
+        return {"passed": False, "checks": checks}
+
+    # ② helm upgrade --install
     r = helm.upgrade_install(release_name, chart_path, NAMESPACE, values_files)
     checks.append(_from_run("helm_install", r, log_dir))
     if checks[-1]["status"] == "fail":

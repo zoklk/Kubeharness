@@ -11,7 +11,7 @@
 from pathlib import Path
 from typing import Optional
 
-from harness.tools import helm, kubectl, yamllint, kubeconform, trivy, gitleaks
+from harness.tools import helm, kubectl, yamllint, kubeconform, trivy, gitleaks, shell
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
@@ -97,6 +97,23 @@ def check_kubectl_dry_run_server(
     detail = (r["stderr"] or r["stdout"]).strip() or "OK"
     status = "pass" if r["exit_code"] == 0 else "fail"
     return _result("kubectl_dry_run_server", status, detail, log_dir, r["stdout"] + r["stderr"])
+
+
+def check_dockerfile(docker_dir: str, log_dir: Optional[str] = None) -> dict:
+    """
+    Dockerfile 정적 검사.
+    - hadolint 설치 시: lint 실행
+    - 미설치 시: Dockerfile 존재 여부만 확인(skip)
+    """
+    dockerfile = Path(docker_dir) / "Dockerfile"
+    if not dockerfile.exists():
+        detail = f"Dockerfile not found at {dockerfile}"
+        return _result("dockerfile", "fail", detail, log_dir, detail)
+
+    r = shell.run(["hadolint", str(dockerfile)])
+    if r["exit_code"] == 127 or "not found" in r["stderr"].lower():
+        return _result("dockerfile", "skip", "hadolint not installed", log_dir)
+    return _from_run("dockerfile", r, log_dir)
 
 
 def check_path_prefix(
