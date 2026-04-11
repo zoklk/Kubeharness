@@ -526,7 +526,7 @@ def test_write_files_success(tmp_path, monkeypatch):
         "edge-server/helm/app/Chart.yaml",
         "edge-server/helm/app/values.yaml",
     ]
-    assert (tmp_path / "edge-server/helm/app/Chart.yaml").read_text() == "apiVersion: v2"
+    assert (tmp_path / "edge-server/helm/app/Chart.yaml").read_text() == "apiVersion: v2\n"
 
 
 def test_write_files_empty_content_skipped(tmp_path, monkeypatch):

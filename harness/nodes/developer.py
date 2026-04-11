@@ -360,7 +360,7 @@ def _write_files(files: list[dict]) -> tuple[list[str], str | None]:
         try:
             p = PROJECT_ROOT / path
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding="utf-8")
+            p.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
             written.append(path)
         except OSError as e:
             return written, f"Write failed at '{path}': {e}"
