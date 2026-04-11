@@ -75,7 +75,7 @@ def pipe(cmd1: list[str], cmd2: list[str], cwd: Optional[str] = None, timeout: i
         error_msg = str(e)
     finally:
         # 반드시 두 프로세스를 모두 kill+wait해서 좀비 방지
-        for p in [p for p in [p2, p1] if p is not None]:
+        for p in filter(None, [p2, p1]):
             if p.poll() is None:
                 p.kill()
             p.wait()

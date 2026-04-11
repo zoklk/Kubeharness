@@ -301,9 +301,7 @@ def main() -> None:
                 console.print("[red]중단합니다.[/red]")
                 sys.exit(1)
             # pass/fail 모두 resume → 다음 루프에서 graph.stream(None) 처리
-            if not snapshot.next:
-                # pass → END: resume 후 그래프 완료, 다음 루프에서 break
-                pass
+            # pass → END: resume 후 그래프 완료, 다음 루프에서 break
             # fail → resume 후 interrupt_before["developer"] 발생, 다음 루프에서 처리
 
         elif not snapshot.next:
@@ -339,7 +337,7 @@ def _on_event(event: dict) -> None:
         console.print(f"[cyan]⟳[/cyan]  Developer  [{name}]")
         _print_artifacts(event)
     elif stage == "static_verify":
-        v = event.get("static_verification") or {}
+        v = event.get("verification") or {}
         status = "[green]pass[/green]" if v.get("passed") else "[red]fail[/red]"
         console.print(f"[cyan]⟳[/cyan]  Static Verifier  [{name}]  {status}")
     elif stage == "runtime_verify":
