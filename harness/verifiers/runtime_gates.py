@@ -8,7 +8,7 @@ run_runtime_phase1(service_name) -> {"passed": bool, "checks": [...]}
   has_manifests : edge-server/manifests/<service>/ → kubectl apply (pod wait 없음)
   둘 다 없음    : 즉시 fail
 
-컨벤션 (context/conventions.md와 동기화):
+컨벤션 (context/inject/conventions.md와 동기화):
   namespace      : gikview
   release_name   : <service>-dev-v1
   label_selector : app.kubernetes.io/name=<service>

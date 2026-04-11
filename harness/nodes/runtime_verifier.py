@@ -24,7 +24,7 @@ from harness.state import HarnessState
 from harness.verifiers.runtime_gates import run_runtime_phase1
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_PROMPT_PATH = PROJECT_ROOT / "context" / "runtime_verifier_prompt.md"
+_PROMPT_PATH = PROJECT_ROOT / "context" / "harness" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 5
 
 _DEFAULT_SYSTEM_PROMPT = (

@@ -704,8 +704,9 @@ def test_extract_service_name_fallback_on_empty_spec():
 def test_build_user_message_contains_target(tmp_path, monkeypatch):
     """user message에 phase, sub_goal name, spec 포함."""
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
-    (tmp_path / "conventions.md").write_text("conv", encoding="utf-8")
-    (tmp_path / "tech_stack.md").write_text("tech", encoding="utf-8")
+    (tmp_path / "inject").mkdir()
+    (tmp_path / "inject" / "conventions.md").write_text("conv", encoding="utf-8")
+    (tmp_path / "inject" / "tech_stack.md").write_text("tech", encoding="utf-8")
 
     sub_goal_spec = "Spec here."
     msg = _build_user_message(_state(), sub_goal_spec, SERVICE)
