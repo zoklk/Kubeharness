@@ -140,7 +140,7 @@ LLM 없음. 결정적 실행.
 
 ### Phase 1 (결정적 게이트)
 
-순서대로 실행. fail 시 이후 skip.
+순서대로 실행. `kubectl_wait` 실패 시에도 `kubectl_events`는 진단 목적으로 계속 실행. `smoke_test`만 skip.
 
 | 단계 | 조건 | 동작 |
 |------|------|------|
@@ -148,8 +148,8 @@ LLM 없음. 결정적 실행.
 | helm upgrade --install | `edge-server/helm/<service>/` 존재 | `--wait` 없음 (빠른 적용) |
 | kubectl apply | `edge-server/manifests/<service>/` 존재 (helm 없을 때) | |
 | kubectl wait pods | helm 경로일 때만 | `--timeout=300s`, label=`app.kubernetes.io/name=<service>` |
-| kubectl events | Warning 이벤트 최근 5분 | |
-| smoke test | `edge-server/scripts/smoke-test-<service_name>.sh` 존재 시 | bash로 실행 |
+| kubectl events | Warning 이벤트 최근 5분 | **kubectl_wait 실패 시에도 실행** (진단 정보 수집) |
+| smoke test | `edge-server/scripts/smoke-test-<service_name>.sh` 존재 시 | kubectl_wait 실패 시 skip |
 
 **values 파일**: `values.yaml` + `values-{active}.yaml` (static_verifier와 동일 로직)
 
@@ -159,16 +159,17 @@ LLM 없음. 결정적 실행.
 
 ### Phase 2 (LLM 진단)
 
-Phase 1 pass 시에만 실행.
+**Phase 1 fail 시에만 실행** (Phase 1이 완전 통과하면 LLM 불필요).
 
-- kagent 도구: 읽기 전용 + 제한적 쓰기 (`k8s_patch_resource`, `k8s_rollout`)
-- 응답: `{"passed": bool, "observations": [...], "suggestions": [...]}`
-- Phase 1 + Phase 2 모두 pass여야 `verification.passed = true`
+- kagent 도구: 읽기 전용 (`GetPodLogs`, `DescribeResource`, `GetEvents` 등)
+- 역할: 실패 원인 진단. pod 로그, 이벤트, describe로 root cause를 파악해 Developer에게 구체적 수정 지시 제공
+- 응답: `{"passed": false, "observations": [...], "suggestions": [...]}`
+- `passed`는 항상 `false` (Phase 1이 실패했으므로)
 
 ### 라우팅
 
-- passed → END
-- failed → developer (error_count 증가)
+- Phase 1 전부 통과 (smoke test 포함) → END (`verification.passed = true`)
+- Phase 1 fail → Phase 2 LLM 진단 → developer (`verification.passed = false`, error_count 증가)
 
 ---
 

@@ -229,7 +229,10 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
         detail = (r["stdout"] + r["stderr"]).strip() or "OK"
         checks.append(_result("kubectl_wait", status, detail, log_dir, r["stdout"] + r["stderr"]))
         if status == "fail":
-            checks += [_skip("kubectl_events"), _skip("smoke_test")]
+            # kubectl_events는 진단 정보를 위해 계속 실행 (Phase 2 LLM에 전달)
+            r = kubectl.get_events(NAMESPACE, field_selector="type=Warning,involvedObject.kind=Pod")
+            checks.append(_parse_warning_events(r, log_dir))
+            checks.append(_skip("smoke_test"))
             return {"passed": False, "checks": checks}
 
     else:

@@ -4,12 +4,12 @@ Runtime Verifier 노드.
 Phase 1 (결정적 게이트):
     run_runtime_phase1() → helm install, kubectl wait, events, smoke test
 
-Phase 2 (LLM 진단):
-    kagent read-only tool + JSON schema 강제 응답
-    {"passed": bool, "observations": [...], "suggestions": [...]}
+Phase 2 (LLM 진단) — Phase 1 fail 시에만 실행:
+    kagent read-only tool로 실패 원인 진단
+    {"passed": false, "observations": [...], "suggestions": [...]}
 
-Phase 1 fail → Phase 2 skip, verification.passed=False
-Phase 1 pass → Phase 2 진행, 결과 종합
+Phase 1 pass → Phase 2 skip, verification.passed=True (smoke test 포함 전부 통과)
+Phase 1 fail → Phase 2 진단 실행, verification.passed=False (항상)
 """
 
 import asyncio
@@ -28,11 +28,13 @@ _PROMPT_PATH = PROJECT_ROOT / "context" / "harness" / "runtime_verifier_prompt.m
 _MAX_TOOL_TURNS = 5
 
 _DEFAULT_SYSTEM_PROMPT = (
-    "You are a Kubernetes runtime verifier. "
-    "Analyze the deployment results using the available tools, then respond ONLY with "
+    "You are a Kubernetes deployment diagnostician. "
+    "Phase 1 deterministic checks have failed. "
+    "Use the available tools to investigate the root cause "
+    "(pod logs, events, describe resources), then respond ONLY with "
     "valid JSON matching this schema exactly:\n"
-    '{"passed": bool, "observations": [{"area": str, "finding": str}], "suggestions": [str]}\n'
-    "Set passed=true only if the deployment is healthy with no significant issues. "
+    '{"passed": false, "observations": [{"area": str, "finding": str}], "suggestions": [str]}\n'
+    "passed must always be false. Focus on actionable fix suggestions. "
     "Do not include any text outside the JSON object."
 )
 
@@ -195,20 +197,21 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
         run_runtime_phase1, service_name, log_dir=runtime_log_dir
     )
 
-    if not phase1["passed"]:
+    if phase1["passed"]:
+        # Phase 1 완전 통과 (smoke test 포함) — LLM 진단 불필요
         return {
             "current_sub_goal": {**sub_goal, "stage": "runtime_verify"},
             "runtime_verification": {"runtime_phase1": phase1},
             "verification": {
                 **state.get("verification", {}),
-                "passed": False,
+                "passed": True,
                 "stage": "runtime",
                 "runtime_phase1": phase1,
                 "log_dir": log_dir_base,
             },
         }
 
-    # ── Phase 2 (LLM) ────────────────────────────────────────────────────────
+    # ── Phase 2 (LLM 진단) — Phase 1 fail 시에만 실행 ───────────────────────
     sub_goal_spec = state.get("sub_goal_spec", "")
     messages = [
         {"role": "system", "content": _load_system_prompt()},
@@ -219,8 +222,10 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
                 f"Phase: {sub_goal.get('phase', '')}\n\n"
                 + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
                 + _phase1_summary(phase1)
-                + "\n\nAnalyze the deployment using available tools, "
-                  "then provide your assessment as JSON."
+                + "\n\nPhase 1 failed. Use the available tools to diagnose the root cause "
+                  "(check pod logs, events, describe resources). "
+                  "Identify why the deployment failed and provide actionable fix suggestions. "
+                  "Set passed=false in your response."
             ),
         },
     ]
@@ -231,8 +236,6 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)
 
-    overall_passed = phase1["passed"] and phase2["passed"]
-
     return {
         "current_sub_goal": {**sub_goal, "stage": "runtime_verify"},
         "runtime_verification": {
@@ -241,7 +244,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
         },
         "verification": {
             **state.get("verification", {}),
-            "passed": overall_passed,
+            "passed": False,  # Phase 1 failed → always False
             "stage": "runtime",
             "runtime_phase1": phase1,
             "runtime_phase2": phase2,

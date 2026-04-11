@@ -1,6 +1,9 @@
 """
 harness/nodes/runtime_verifier.py 단위 테스트
-run_runtime_phase1, _load_tools, llm.chat를 mock해서 노드 로직 검증.
+
+동작 원칙:
+  Phase 1 pass → LLM 호출 없음, verification.passed=True, runtime_phase2 없음
+  Phase 1 fail → Phase 2 LLM 진단 실행, verification.passed=False (항상)
 """
 
 import asyncio
@@ -67,23 +70,24 @@ def _phase2_json(passed: bool, observations=None, suggestions=None) -> str:
     })
 
 
-# ── Phase 1 fail: Phase 2 skip ────────────────────────────────────────────────
+# ── Phase 1 pass: LLM 호출 없이 즉시 통과 ────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_phase1_fail_skips_phase2():
+async def test_phase1_pass_no_llm():
+    """Phase 1 완전 통과 시 LLM 호출 없음, passed=True, runtime_phase2 없음."""
     with (
         patch("harness.nodes.runtime_verifier.run_runtime_phase1",
-              return_value=_phase1_fail("immutable field")) as m_p1,
+              return_value=_phase1_pass()) as m_p1,
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])) as m_tools,
         patch("harness.llm.client.chat") as m_chat,
     ):
         result = await runtime_verifier_node(_state())
 
-    m_p1.assert_called_once_with(SERVICE, log_dir=str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_0/runtime"))
+    m_p1.assert_called_once()
     m_tools.assert_not_called()
     m_chat.assert_not_called()
 
-    assert result["verification"]["passed"] is False
+    assert result["verification"]["passed"] is True
     assert result["verification"]["stage"] == "runtime"
     assert "runtime_phase1" in result["verification"]
     assert "runtime_phase2" not in result["verification"]
@@ -91,9 +95,54 @@ async def test_phase1_fail_skips_phase2():
 
 
 @pytest.mark.asyncio
+async def test_phase1_pass_checks_preserved():
+    """Phase 1 pass 결과가 verification에 보존된다."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.llm.client.chat"),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    p1 = result["verification"]["runtime_phase1"]
+    assert p1["passed"] is True
+    assert any(c["name"] == "helm_install" for c in p1["checks"])
+
+
+# ── Phase 1 fail: Phase 2 LLM 진단 실행 ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_phase1_fail_runs_phase2():
+    """Phase 1 fail → Phase 2 LLM 진단 실행, runtime_phase2 결과 포함."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1",
+              return_value=_phase1_fail("immutable field")) as m_p1,
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])) as m_tools,
+        patch("harness.llm.client.chat",
+              return_value=_llm_resp(_phase2_json(False, suggestions=["fix the chart"]))) as m_chat,
+    ):
+        result = await runtime_verifier_node(_state())
+
+    m_p1.assert_called_once_with(SERVICE, log_dir=str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_0/runtime"))
+    m_tools.assert_called_once()
+    m_chat.assert_called()
+
+    assert result["verification"]["passed"] is False
+    assert result["verification"]["stage"] == "runtime"
+    assert "runtime_phase1" in result["verification"]
+    assert "runtime_phase2" in result["verification"]
+    assert result["current_sub_goal"]["stage"] == "runtime_verify"
+
+
+@pytest.mark.asyncio
 async def test_phase1_fail_detail_preserved():
-    with patch("harness.nodes.runtime_verifier.run_runtime_phase1",
-               return_value=_phase1_fail("immutable field")):
+    """Phase 1 fail detail이 runtime_phase1에 보존된다."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1",
+               return_value=_phase1_fail("immutable field")),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat",
+              return_value=_llm_resp(_phase2_json(False))),
+    ):
         result = await runtime_verifier_node(_state())
 
     p1 = result["verification"]["runtime_phase1"]
@@ -101,44 +150,41 @@ async def test_phase1_fail_detail_preserved():
     assert "immutable field" in helm_check["detail"]
 
 
-# ── Phase 1 pass + Phase 2 pass ───────────────────────────────────────────────
-
 @pytest.mark.asyncio
-async def test_phase1_pass_phase2_pass():
+async def test_phase1_fail_phase2_always_false():
+    """Phase 1 fail 시 Phase 2가 passed=true를 반환해도 verification.passed는 False."""
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1",
+              return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
         patch("harness.llm.client.chat",
-              return_value=_llm_resp(_phase2_json(passed=True, suggestions=["Looks healthy"]))),
-    ):
-        result = await runtime_verifier_node(_state())
-
-    assert result["verification"]["passed"] is True
-    p2 = result["verification"]["runtime_phase2"]
-    assert p2["passed"] is True
-    assert "Looks healthy" in p2["suggestions"]
-
-
-# ── Phase 1 pass + Phase 2 fail ───────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_phase1_pass_phase2_fail():
-    with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
-        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
-        patch("harness.llm.client.chat",
-              return_value=_llm_resp(_phase2_json(
-                  passed=False,
-                  observations=[{"area": "logs", "finding": "OOM detected"}],
-                  suggestions=["Increase memory limit"],
-              ))),
+              return_value=_llm_resp(_phase2_json(passed=True))),
     ):
         result = await runtime_verifier_node(_state())
 
     assert result["verification"]["passed"] is False
+
+
+@pytest.mark.asyncio
+async def test_phase1_fail_suggestions_forwarded():
+    """Phase 2 진단 suggestions가 Developer에게 전달되도록 verification에 포함된다."""
+    suggestions = ["Increase memory limit to 512Mi", "Check EMQX_NODE__NAME env var"]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1",
+              return_value=_phase1_fail("kubectl_wait timed out")),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat",
+              return_value=_llm_resp(_phase2_json(
+                  False,
+                  observations=[{"area": "pod", "finding": "OOMKilled"}],
+                  suggestions=suggestions,
+              ))),
+    ):
+        result = await runtime_verifier_node(_state())
+
     p2 = result["verification"]["runtime_phase2"]
-    assert p2["passed"] is False
-    assert any(o["finding"] == "OOM detected" for o in p2["observations"])
+    assert p2["suggestions"] == suggestions
+    assert any(o["finding"] == "OOMKilled" for o in p2["observations"])
 
 
 # ── Phase 2 JSON 파싱 실패 ────────────────────────────────────────────────────
@@ -146,7 +192,7 @@ async def test_phase1_pass_phase2_fail():
 @pytest.mark.asyncio
 async def test_phase2_parse_failure_treated_as_fail():
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
         patch("harness.llm.client.chat",
               return_value=_llm_resp("Sorry, I cannot provide analysis right now.")),
@@ -162,15 +208,16 @@ async def test_phase2_parse_failure_treated_as_fail():
 @pytest.mark.asyncio
 async def test_phase2_codeblock_json_parsed():
     """```json ... ``` 코드 블록으로 감싼 응답도 파싱 가능."""
-    wrapped = "```json\n" + _phase2_json(passed=True) + "\n```"
+    wrapped = "```json\n" + _phase2_json(False, suggestions=["fix it"]) + "\n```"
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
         patch("harness.llm.client.chat", return_value=_llm_resp(wrapped)),
     ):
         result = await runtime_verifier_node(_state())
 
-    assert result["verification"]["passed"] is True
+    p2 = result["verification"]["runtime_phase2"]
+    assert "fix it" in p2["suggestions"]
 
 
 # ── kagent tools 로드 실패 (graceful degradation) ──────────────────────────────
@@ -182,10 +229,10 @@ async def test_tools_load_failure_continues():
         raise ConnectionError("kagent unreachable")
 
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier.get_kagent_tools", new=_raise),
         patch("harness.llm.client.chat",
-              return_value=_llm_resp(_phase2_json(passed=True))),
+              return_value=_llm_resp(_phase2_json(False))),
     ):
         result = await runtime_verifier_node(_state())
 
@@ -227,19 +274,19 @@ async def test_tool_calling_loop():
 
     llm_responses = [
         _llm_resp("", tool_calls=[{"id": "tc1", "name": "k8s_get_resources", "input": {"resource_type": "pod"}}]),
-        _llm_resp(_phase2_json(passed=True, observations=[{"area": "pod", "finding": "All pods running"}])),
+        _llm_resp(_phase2_json(False, observations=[{"area": "pod", "finding": "CrashLoopBackOff"}])),
     ]
 
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([mock_tool], [tool_dict])),
         patch("harness.llm.client.chat", side_effect=llm_responses),
     ):
         result = await runtime_verifier_node(_state())
 
-    assert result["verification"]["passed"] is True
+    assert result["verification"]["passed"] is False
     p2 = result["verification"]["runtime_phase2"]
-    assert any(o["finding"] == "All pods running" for o in p2["observations"])
+    assert any(o["finding"] == "CrashLoopBackOff" for o in p2["observations"])
 
 
 @pytest.mark.asyncio
@@ -258,11 +305,11 @@ async def test_parallel_tool_calls():
             {"id": "tc1", "name": "k8s_get_resources", "input": {}},
             {"id": "tc2", "name": "k8s_get_events", "input": {}},
         ]),
-        _llm_resp(_phase2_json(passed=True)),
+        _llm_resp(_phase2_json(False)),
     ]
 
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([tool_a, tool_b], tool_dicts)),
         patch("harness.llm.client.chat", side_effect=llm_responses) as m_chat,
     ):
@@ -274,7 +321,7 @@ async def test_parallel_tool_calls():
     assert len(tool_results) == 2
     tool_ids = {m["tool_call_id"] for m in tool_results}
     assert "tc1" in tool_ids and "tc2" in tool_ids
-    assert result["verification"]["passed"] is True
+    assert result["verification"]["passed"] is False
 
 
 @pytest.mark.asyncio
@@ -284,11 +331,11 @@ async def test_tool_unknown_returns_error_message():
 
     llm_responses = [
         _llm_resp("", tool_calls=[{"id": "tc1", "name": "nonexistent_tool", "input": {}}]),
-        _llm_resp(_phase2_json(passed=False)),
+        _llm_resp(_phase2_json(False)),
     ]
 
     with (
-        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [tool_dict])),
         patch("harness.llm.client.chat", side_effect=llm_responses) as m_chat,
     ):
@@ -303,11 +350,27 @@ async def test_tool_unknown_returns_error_message():
 # ── state 필드 및 log_dir ─────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_state_fields():
+async def test_state_fields_phase1_pass():
+    """Phase 1 pass 시 state 필드: runtime_phase2 없음."""
     with (
         patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.llm.client.chat"),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    assert "runtime_verification" in result
+    assert "runtime_phase1" in result["runtime_verification"]
+    assert "runtime_phase2" not in result["runtime_verification"]
+    assert result["current_sub_goal"]["stage"] == "runtime_verify"
+
+
+@pytest.mark.asyncio
+async def test_state_fields_phase1_fail():
+    """Phase 1 fail 시 state 필드: runtime_phase2 포함."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
-        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(passed=True))),
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
     ):
         result = await runtime_verifier_node(_state())
 
@@ -318,11 +381,11 @@ async def test_state_fields():
 
 
 @pytest.mark.asyncio
-async def test_log_dir_format():
+async def test_log_dir_format_pass():
+    """Phase 1 pass 시 log_dir 올바른 포맷."""
     with (
         patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
-        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
-        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(passed=True))),
+        patch("harness.llm.client.chat"),
     ):
         result = await runtime_verifier_node(_state(error_count=2))
 
@@ -330,10 +393,13 @@ async def test_log_dir_format():
 
 
 @pytest.mark.asyncio
-async def test_log_dir_phase1_fail():
-    """Phase 1 fail 시에도 log_dir 올바른 포맷."""
-    with patch("harness.nodes.runtime_verifier.run_runtime_phase1",
-               return_value=_phase1_fail()):
+async def test_log_dir_format_fail():
+    """Phase 1 fail 시 log_dir 올바른 포맷."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
         result = await runtime_verifier_node(_state(error_count=1))
 
     assert result["verification"]["log_dir"] == str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_1") + "/"
@@ -380,10 +446,8 @@ def test_parse_phase2_thinking_then_json():
 def test_phase1_summary_pass_only_shows_name():
     """pass 항목은 이름만, fail 항목은 detail까지 포함."""
     summary = _phase1_summary(_phase1_pass())
-    # pass 항목은 detail 없이 이름만
     assert "[PASS] helm_install" in summary
     assert "[PASS] kubectl_wait" in summary
-    # skip 항목은 detail 없이 이름만
     assert "[SKIP] smoke_test" in summary
 
 
@@ -393,5 +457,4 @@ def test_phase1_summary_fail_shows_detail():
     summary = _phase1_summary(phase1)
     assert "[FAIL] helm_install" in summary
     assert "immutable field error on ConfigMap" in summary
-    # 나머지 skip 항목은 detail 없이 이름만
     assert "[SKIP] kubectl_wait" in summary

@@ -202,18 +202,40 @@ def test_helm_immutable_reinstall_fails():
 
 # ── kubectl_wait fail ─────────────────────────────────────────────────────────
 
-def test_kubectl_wait_fail():
+def test_kubectl_wait_fail_still_collects_events():
+    """kubectl_wait 실패 시에도 kubectl_events는 진단 정보를 위해 실행된다."""
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])) as m_ev,
     ):
         result = run_runtime_phase1(SERVICE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_wait"] == "fail"
-    assert statuses["kubectl_events"] == "skip"
+    assert statuses["kubectl_events"] == "pass"   # events 실행됨, warning 없음
     assert statuses["smoke_test"] == "skip"
+    m_ev.assert_called_once()
+
+
+def test_kubectl_wait_fail_with_warning_events():
+    """kubectl_wait 실패 + warning 이벤트 존재 시 kubectl_events=fail."""
+    ev = _warning_event(msg="OOMKilled", reason="OOMKilling", minutes_ago=1.0)
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([ev])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "fail"
+    assert statuses["kubectl_events"] == "fail"   # warning 발견
+    assert statuses["smoke_test"] == "skip"
+    ev_check = next(c for c in result["checks"] if c["name"] == "kubectl_events")
+    assert "OOMKilling" in ev_check["detail"]
 
 
 # ── kubectl_events: warning 있음 ──────────────────────────────────────────────
