@@ -31,11 +31,13 @@ def _manifest_dir(service_name: str) -> str:
 
 
 def _values_files(chart_path: str) -> list[str]:
-    """존재하는 values 파일만 반환 (chart_path는 절대 경로)."""
+    """존재하는 values 파일만 반환. active 환경의 오버라이드 파일을 사용."""
+    from harness.config import cluster_config
+    active = cluster_config().get("_active", "dev")
     return [
         vf for vf in [
             f"{chart_path}/values.yaml",
-            f"{chart_path}/values-dev.yaml",
+            f"{chart_path}/values-{active}.yaml",
         ]
         if Path(vf).exists()
     ]
@@ -143,7 +145,7 @@ def static_verifier_node(state: HarnessState) -> dict:
 
     return {
         "current_sub_goal": {**sub_goal, "stage": "static_verify"},
-        "static_verification": {"checks": checks},
+        "static_verification": {"passed": passed, "checks": checks},
         "verification": {
             "passed": passed,
             "stage": "static",

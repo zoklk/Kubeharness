@@ -3,14 +3,20 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from harness.config import kubeconfig_path
+
 
 def _env() -> dict:
-    """~/.local/bin을 PATH 앞에 추가한 환경변수 반환."""
+    """~/.local/bin을 PATH 앞에 추가하고, cluster.yaml의 kubeconfig를 KUBECONFIG로 주입."""
     env = os.environ.copy()
     local_bin = str(Path.home() / ".local" / "bin")
     current_path = env.get("PATH", "")
     if local_bin not in current_path.split(":"):
         env["PATH"] = f"{local_bin}:{current_path}"
+    # cluster.yaml에 kubeconfig 경로가 명시된 경우, 환경변수가 없을 때만 주입
+    kc = kubeconfig_path()
+    if kc and "KUBECONFIG" not in env:
+        env["KUBECONFIG"] = kc
     return env
 
 

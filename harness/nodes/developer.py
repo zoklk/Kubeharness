@@ -18,6 +18,7 @@ from typing import Any
 
 from rich.console import Console
 
+from harness.config import all_envs, cluster_config
 from harness.llm import client as llm
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
@@ -136,10 +137,36 @@ def _build_user_message(state: HarnessState, sub_goal_spec: str, service_name: s
 
     existing_files_section = _build_existing_files_section(service_name)
 
+    active_env = cluster_config().get("_active", "dev")
+    envs = all_envs()
+
+    env_rows = "\n".join(
+        f"| `{env_name}` | `{cfg['domain_suffix']}` | `{cfg['arch']}` |"
+        for env_name, cfg in envs.items()
+    )
+    env_detail = "\n".join(
+        f"### `{env_name}` (`values-{env_name}.yaml`)\n"
+        f"- domain_suffix: `{cfg['domain_suffix']}`\n"
+        f"- arch: `linux/{cfg['arch']}`\n"
+        f"- DNS example: `<service>-headless.gikview.svc.{cfg['domain_suffix']}`"
+        for env_name, cfg in envs.items()
+    )
+
     parts = [
         f"## Target\nPhase: {phase}\nSub-Goal: {name}",
         f"## Conventions\n{_read_context('conventions.md')}",
         f"## Tech Stack\n{_read_context('tech_stack.md')}",
+        (
+            f"## Cluster Environments\n"
+            f"**Active for testing**: `{active_env}` "
+            f"(Static/Runtime Verifier will use `values-{active_env}.yaml`)\n\n"
+            f"**You MUST write `values-dev.yaml` AND `values-prod.yaml` for EVERY service.**\n"
+            f"Each file overrides environment-specific values (domain, arch, resources).\n\n"
+            f"| env | domain_suffix | arch |\n"
+            f"|-----|--------------|------|\n"
+            f"{env_rows}\n\n"
+            f"{env_detail}"
+        ),
         f"## Sub-Goal Specification\n{sub_goal_spec}",
     ]
 
