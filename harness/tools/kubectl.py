@@ -62,3 +62,9 @@ def get_endpoints(name: str, namespace: str) -> dict:
 def describe(resource: str, name: str, namespace: str) -> dict:
     cmd = ["kubectl", "describe", resource, name, "-n", namespace]
     return run(cmd)
+
+
+def delete_pods(namespace: str, label: str) -> dict:
+    """label selector에 매칭되는 pod를 강제 삭제. --ignore-not-found로 없어도 OK."""
+    cmd = ["kubectl", "delete", "pods", "-n", namespace, "-l", label, "--ignore-not-found"]
+    return run(cmd)

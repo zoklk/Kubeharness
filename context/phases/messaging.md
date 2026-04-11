@@ -45,7 +45,7 @@
   # values.yaml (공통)
   emqxConfig:
     EMQX_CLUSTER__DISCOVERY_STRATEGY: "dns"
-    EMQX_CLUSTER__DNS__RECORD_TYPE: "a"
+    EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"
 
   # values-dev.yaml (domain_suffix: alpha.nexus.local)
   emqxConfig:

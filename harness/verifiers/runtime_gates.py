@@ -252,6 +252,9 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
             if (PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}").exists()
         ]
 
+        # 구 pod 선제 삭제: CrashLoopBackOff back-off 축적 pod가 rolling update를 막는 것을 방지
+        kubectl.delete_pods(NAMESPACE, lsel)
+
         # immutable field 감지 시 uninstall 후 재설치
         # "immutable": generic k8s field, "forbidden: updates to statefulset spec": PVC/volumeClaimTemplates 변경
         r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
