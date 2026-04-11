@@ -16,9 +16,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+from rich.console import Console
+
 from harness.llm import client as llm
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
+
+_console = Console()
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _CONTEXT_DIR = PROJECT_ROOT / "context"
@@ -125,13 +129,12 @@ def _verification_summary(verification: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_user_message(state: HarnessState) -> str:
+def _build_user_message(state: HarnessState, sub_goal_spec: str, service_name: str) -> str:
     sub_goal = state["current_sub_goal"]
     phase = sub_goal["phase"]
     name = sub_goal["name"]
 
-    phase_md = _read_context(f"phases/{phase}.md")
-    sub_goal_spec = _extract_subgoal_section(phase_md, name)
+    existing_files_section = _build_existing_files_section(service_name)
 
     parts = [
         f"## Target\nPhase: {phase}\nSub-Goal: {name}",
@@ -139,6 +142,20 @@ def _build_user_message(state: HarnessState) -> str:
         f"## Tech Stack\n{_read_context('tech_stack.md')}",
         f"## Sub-Goal Specification\n{sub_goal_spec}",
     ]
+
+    if existing_files_section:
+        parts.append(existing_files_section)
+
+    deps = _extract_dependencies(sub_goal_spec)
+    if deps:
+        dep_list = "\n".join(f"- `{d}`" for d in deps)
+        parts.append(
+            "## Dependency Services\n"
+            "The following services are prerequisites and already deployed in the cluster.\n"
+            "Use kagent tools (`GetResources`, `GetRelease`, `GetResourceYAML`) to inspect\n"
+            "their current state (labels, ports, Secret names, etc.) before writing files.\n\n"
+            + dep_list
+        )
 
     verification = state.get("verification")
     if verification and not verification.get("passed"):
@@ -196,6 +213,13 @@ async def _run_tool_loop(
             messages.append({"role": "assistant", "content": resp.get("content", "")})
             return messages
 
+        # ── tool call 터미널 출력 ──────────────────────────────────────────────
+        for tc in resp["tool_calls"]:
+            preview = json.dumps(tc.get("input", {}), ensure_ascii=False)
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+            _console.print(f"  [dim cyan]⟳ tool[/dim cyan] [bold]{tc['name']}[/bold]  [dim]{preview}[/dim]")
+
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
             "content": resp.get("content", ""),
@@ -220,7 +244,70 @@ async def _run_tool_loop(
     return messages
 
 
-# ── 기존 파일 스캔 ────────────────────────────────────────────────────────────
+# ── 컨텍스트 보강 ────────────────────────────────────────────────────────────
+
+def _extract_dependencies(sub_goal_spec: str) -> list[str]:
+    """
+    sub_goal 섹션에서 dependency 서비스명 목록 추출.
+    형식: - **dependency**: `emqx`, `step-ca`  또는  `없음`
+    못 찾거나 없음이면 빈 리스트 반환.
+    """
+    m = re.search(r'\*\*dependency\*\*\s*:\s*(.+)', sub_goal_spec)
+    if not m:
+        return []
+    value = m.group(1).strip()
+    if "없음" in value:
+        return []
+    return re.findall(r'`([^`]+)`', value)
+
+
+def _build_existing_files_section(service_name: str) -> str:
+    """
+    현재 서비스의 기존 파일 내용을 'Existing Files' 섹션으로 반환.
+    파일이 하나도 없으면 빈 문자열 반환.
+    """
+    def _read_dir(base_rel: str) -> list[tuple[str, str]]:
+        """base_rel(PROJECT_ROOT 상대) 하위 모든 파일을 (rel_path, content) 로 반환."""
+        base = PROJECT_ROOT / base_rel
+        if not base.is_dir():
+            return []
+        result = []
+        for p in sorted(base.rglob("*")):
+            if p.is_file():
+                rel = str(p.relative_to(PROJECT_ROOT))
+                try:
+                    result.append((rel, p.read_text(encoding="utf-8")))
+                except OSError:
+                    result.append((rel, "(read error)"))
+        return result
+
+    def _format_files(files: list[tuple[str, str]]) -> str:
+        parts = []
+        for rel, content in files:
+            parts.append(f"#### `{rel}`\n```\n{content}\n```")
+        return "\n\n".join(parts)
+
+    # 현재 서비스 디렉토리들 (dependency와 무관하게 항상 스캔)
+    current_files: list[tuple[str, str]] = []
+    for sub in ("helm", "manifests", "docker"):
+        current_files.extend(_read_dir(f"edge-server/{sub}/{service_name}"))
+
+    # 터미널 출력
+    if current_files:
+        _console.print(f"  [dim]Existing files injected into context ({len(current_files)}):[/dim]")
+        for rel, _ in current_files:
+            _console.print(f"    [green]✓[/green] {rel}")
+    else:
+        _console.print(f"  [dim]No existing files for '{service_name}' — fresh start[/dim]")
+
+    if not current_files:
+        return ""
+    return (
+        "## Existing Files\n\n"
+        f"### Current Service (`{service_name}`)\n\n"
+        + _format_files(current_files)
+    )
+
 
 def _collect_existing_files(service_name: str) -> list[str]:
     """
@@ -322,6 +409,7 @@ async def developer_node(state: HarnessState) -> dict:
     user_hint는 사용 후 state에서 소거(빈 문자열)하여 다음 재시도에 누적되지 않도록 함.
     """
     sub_goal = state["current_sub_goal"]
+    _console.print(f"\n[cyan]⟳[/cyan]  Developer  [{sub_goal['name']}]")
     error_count = state.get("error_count", 0)
 
     # 재시도 시 error_count 증가
@@ -336,7 +424,7 @@ async def developer_node(state: HarnessState) -> dict:
 
     messages = [
         {"role": "system", "content": _load_system_prompt()},
-        {"role": "user", "content": _build_user_message(state)},
+        {"role": "user", "content": _build_user_message(state, sub_goal_spec, service_name)},
     ]
 
     tool_objs, tools_dicts = await _load_tools()

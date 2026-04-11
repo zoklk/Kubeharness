@@ -251,7 +251,6 @@ async def main() -> None:
             "phase": args.phase,
             "stage": "dev",
         },
-        "history": [],
         "error_count": 0,
     }
 
@@ -338,7 +337,6 @@ def _on_event(event: dict) -> None:
     name = sub_goal.get("name", "")
 
     if stage == "dev":
-        console.print(f"[cyan]⟳[/cyan]  Developer  [{name}]")
         _print_artifacts(event)
     elif stage == "static_verify":
         v = event.get("verification") or {}

@@ -26,7 +26,6 @@ class HarnessState(TypedDict, total=False):
     verification: Optional[dict]
 
     # 이력
-    history: list[dict]
     error_count: int
 
     # 사람 추가 지시 (developer interrupt에서 입력, developer_node가 user message에 포함 후 소거)
