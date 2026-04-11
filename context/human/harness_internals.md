@@ -149,7 +149,8 @@ LLM 없음. 결정적 실행.
 
 ### Phase 1 (결정적 게이트)
 
-순서대로 실행. `kubectl_wait` 실패 시에도 `kubectl_events`는 진단 목적으로 계속 실행. `smoke_test`만 skip.
+순서대로 실행. 하나 fail이면 이후 체크는 skip하고 즉시 반환. `kubectl_wait` 실패 시 smoke_test는 skip.
+이벤트 조회는 Phase 1에서 하지 않음 — Phase 1 fail 시 Phase 2 LLM이 kagent로 직접 수행.
 
 | 단계 | 조건 | 동작 |
 |------|------|------|
@@ -157,7 +158,6 @@ LLM 없음. 결정적 실행.
 | helm upgrade --install | `edge-server/helm/<service>/` 존재 | `--wait` 없음 (빠른 적용) |
 | kubectl apply | `edge-server/manifests/<service>/` 존재 (helm 없을 때) | |
 | kubectl wait pods | helm 경로일 때만 | **2단계**: 60s 대기 → terminal 상태 감지 → terminal이면 즉시 fail / 아니면 240s 추가 대기 |
-| kubectl events | Warning 이벤트 최근 5분 | **kubectl_wait 실패 시에도 실행** (진단 정보 수집) |
 | smoke test | `edge-server/scripts/smoke-test-<service_name>.sh` 존재 시 | kubectl_wait 실패 시 skip |
 
 **values 파일**: `values.yaml` + `values-{active}.yaml` (static_verifier와 동일 로직)

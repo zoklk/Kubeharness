@@ -2,7 +2,7 @@
 Runtime Verifier 노드.
 
 Phase 1 (결정적 게이트):
-    run_runtime_phase1() → helm install, kubectl wait, events, smoke test
+    run_runtime_phase1() → helm install, kubectl wait, smoke test
 
 Phase 2 (LLM 진단) — Phase 1 fail 시에만 실행:
     kagent read-only tool로 실패 원인 진단
@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from harness.config import PROJECT_ROOT
+from harness.config import ARTIFACT_PREFIX, PROJECT_ROOT
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
@@ -99,7 +99,7 @@ def _artifact_files_listing(service_name: str) -> str:
     """Phase 2 LLM에게 서비스 아티팩트 파일 목록 제공 — 제안 시 정확한 파일 경로 참조용."""
     all_files: list[str] = []
     for sub in ("helm", "manifests", "docker"):
-        base = PROJECT_ROOT / f"edge-server/{sub}/{service_name}"
+        base = PROJECT_ROOT / f"{ARTIFACT_PREFIX}{sub}/{service_name}"
         if base.is_dir():
             for p in sorted(base.rglob("*")):
                 if p.is_file():

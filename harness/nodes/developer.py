@@ -255,9 +255,7 @@ def _build_existing_files_section(service_name: str) -> str:
         _console.print(f"  [dim]No existing files for '{service_name}' — fresh start[/dim]")
         return ""
 
-    _console.print(f"  [dim]Existing files ({len(all_files)}) — use read_file tool to inspect:[/dim]")
-    for f in all_files:
-        _console.print(f"    [green]✓[/green] {f}")
+    _console.print(f"  [dim]Existing files ({len(all_files)}) — use read_file tool to inspect[/dim]")
 
     file_list = "\n".join(f"- `{f}`" for f in all_files)
     return (
@@ -267,10 +265,6 @@ def _build_existing_files_section(service_name: str) -> str:
         + file_list
     )
 
-
-def _collect_existing_files(service_name: str) -> list[str]:
-    """LLM이 파일을 쓰지 않았을 때 폴백. _scan_service_files 위임."""
-    return _scan_service_files(service_name)
 
 
 # ── 파싱 및 파일 쓰기 ─────────────────────────────────────────────────────────
@@ -390,7 +384,7 @@ async def developer_node(state: HarnessState) -> dict:
 
     # 쓰기 완료 후 서비스 디렉토리 전체 스캔 (기존 + 새로 쓴 파일 모두 포함)
     # 디렉토리가 아직 없는 완전 신규 서비스면 written_files 폴백
-    artifact_files = _collect_existing_files(service_name) or written_files
+    artifact_files = _scan_service_files(service_name) or written_files
 
     return {
         "current_sub_goal": {**sub_goal, "stage": "dev", "service_name": service_name},

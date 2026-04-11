@@ -13,11 +13,12 @@ run_runtime_phase1(service_name) -> {"passed": bool, "checks": [...]}
   release_name   : <service>-dev-v1
   label_selector : app.kubernetes.io/name=<service>
   smoke_test     : edge-server/scripts/smoke-test-<service>.sh (없으면 skip)
+
+events 조회는 Phase 2 LLM이 kagent로 직접 수행. Phase 1에서는 하지 않음.
 """
 
 import json
 import yaml
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -136,49 +137,6 @@ def _terminal_detail(pods_r: dict) -> str:
     return "; ".join(parts[:3])
 
 
-# ── 이벤트 파싱 ───────────────────────────────────────────────────────────────
-
-def _parse_warning_events(r: dict, log_dir: Optional[str]) -> dict:
-    """kubectl get events JSON에서 최근 5분 이내 Warning 이벤트만 추출."""
-    raw = r["stdout"] + r["stderr"]
-
-    if r["exit_code"] != 0:
-        detail = raw.strip() or "kubectl get events failed"
-        return _result("kubectl_events", "fail", detail, log_dir, raw)
-
-    try:
-        items = json.loads(r["stdout"]).get("items", [])
-    except (json.JSONDecodeError, AttributeError):
-        return _result("kubectl_events", "fail", "events JSON parse error", log_dir, raw)
-
-    cutoff = datetime.now(timezone.utc) - timedelta(minutes=5)
-    warnings = []
-    for ev in items:
-        ts_str = (
-            ev.get("lastTimestamp")
-            or ev.get("eventTime")
-            or (ev.get("series") or {}).get("lastObservedTime")
-        )
-        if not ts_str:
-            continue
-        try:
-            ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if ts >= cutoff:
-            obj = ev.get("involvedObject", {}).get("name", "?")
-            reason = ev.get("reason", "")
-            msg = ev.get("message", "")
-            warnings.append(f"[{obj}] {reason}: {msg}")
-
-    if warnings:
-        detail = f"{len(warnings)} warning(s) in last 5m: " + "; ".join(warnings[:5])
-        return _result("kubectl_events", "fail", detail, log_dir, raw)
-
-    return _result("kubectl_events", "pass",
-                   f"no warnings in last 5m (total={len(items)})", log_dir, raw)
-
-
 # ── 메인 게이트 함수 ──────────────────────────────────────────────────────────
 
 def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict:
@@ -189,6 +147,9 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
       - edge-server/helm/<service>/ 존재 → helm upgrade --install + kubectl wait pods
       - edge-server/manifests/<service>/ 존재 (helm 없음) → kubectl apply (pod wait 생략)
       - 둘 다 없음 → 즉시 fail
+
+    Phase 1 체크: deploy → kubectl_wait (helm만) → smoke_test
+    events 조회는 Phase 2 LLM(kagent)이 담당. Phase 1에서는 수행하지 않음.
 
     Returns:
         {"passed": bool, "checks": [{"name", "status", "detail", "log_path"}, ...]}
@@ -223,9 +184,9 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
 
     deploy_step = "helm_install" if has_helm else "kubectl_apply"
     post_deploy_skips = (
-        [_skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
+        [_skip("kubectl_wait"), _skip("smoke_test")]
         if has_helm
-        else [_skip("kubectl_events"), _skip("smoke_test")]
+        else [_skip("smoke_test")]
     )
 
     if not registry and (PROJECT_ROOT / f"edge-server/docker/{service_name}" / "Dockerfile").exists():
@@ -252,8 +213,11 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
             if (PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}").exists()
         ]
 
-        # 구 pod 선제 삭제: CrashLoopBackOff back-off 축적 pod가 rolling update를 막는 것을 방지
-        kubectl.delete_pods(NAMESPACE, lsel)
+        # terminal 상태 pod만 선제 삭제: CrashLoopBackOff back-off 축적 pod가 rolling update를 막는 것을 방지
+        # 정상 Running pod를 강제 삭제하면 EMQX 등 agent mode 전환 재시작 사이클이 반복됨
+        _pods_before = kubectl.get_pods(NAMESPACE, label=lsel)
+        if _is_terminal_failure(_pods_before):
+            kubectl.delete_pods(NAMESPACE, lsel)
 
         # immutable field 감지 시 uninstall 후 재설치
         # "immutable": generic k8s field, "forbidden: updates to statefulset spec": PVC/volumeClaimTemplates 변경
@@ -267,14 +231,13 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
             uninstall_check = _from_run("helm_uninstall_immutable", uninstall_r, log_dir)
             checks.append(uninstall_check)
             if uninstall_check["status"] == "fail":
-                checks += [_skip("helm_install"), _skip("kubectl_wait"),
-                           _skip("kubectl_events"), _skip("smoke_test")]
+                checks += [_skip("helm_install"), _skip("kubectl_wait"), _skip("smoke_test")]
                 return {"passed": False, "checks": checks}
             r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
 
         checks.append(_from_run("helm_install", r, log_dir))
         if checks[-1]["status"] == "fail":
-            checks += [_skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
+            checks += [_skip("kubectl_wait"), _skip("smoke_test")]
             return {"passed": False, "checks": checks}
 
         # ④ kubectl wait pods — 2단계: 60s 조기 감지 + 240s 잔여 대기
@@ -295,9 +258,6 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
                 checks.append(_from_run("kubectl_wait", r240, log_dir))
 
         if checks[-1]["status"] == "fail":
-            # kubectl_events는 진단 정보를 위해 계속 실행 (Phase 2 LLM에 전달)
-            r = kubectl.get_events(NAMESPACE, field_selector="type=Warning,involvedObject.kind=Pod")
-            checks.append(_parse_warning_events(r, log_dir))
             checks.append(_skip("smoke_test"))
             return {"passed": False, "checks": checks}
 
@@ -306,17 +266,10 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
         r = kubectl.apply(manifest_dir, NAMESPACE)
         checks.append(_from_run("kubectl_apply", r, log_dir))
         if checks[-1]["status"] == "fail":
-            checks += [_skip("kubectl_events"), _skip("smoke_test")]
+            checks += [_skip("smoke_test")]
             return {"passed": False, "checks": checks}
 
-    # ⑤ kubectl get events (Warning, 최근 5분)
-    r = kubectl.get_events(NAMESPACE, field_selector="type=Warning,involvedObject.kind=Pod")
-    checks.append(_parse_warning_events(r, log_dir))
-    if checks[-1]["status"] == "fail":
-        checks.append(_skip("smoke_test"))
-        return {"passed": False, "checks": checks}
-
-    # ⑥ smoke test
+    # ⑤ smoke test
     if smoke_test_path.exists():
         r = shell.run(["bash", str(smoke_test_path)])
         checks.append(_from_run("smoke_test", r, log_dir))

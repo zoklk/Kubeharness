@@ -184,7 +184,7 @@ async def test_parse_failure_returns_empty_files():
         patch("harness.nodes.developer._load_tools", return_value=([], [])),
         patch("harness.llm.client.chat",
               return_value=_llm_resp("Sorry, I cannot help with that.")),
-        patch("harness.nodes.developer._collect_existing_files", return_value=[]),
+        patch("harness.nodes.developer._scan_service_files", return_value=[]),
     ):
         result = await developer_node(_state())
 

@@ -4,14 +4,13 @@ harness/verifiers/runtime_gates.py 단위 테스트
 """
 
 import json
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from harness.verifiers.runtime_gates import (
-    run_runtime_phase1, _parse_warning_events,
+    run_runtime_phase1,
     _is_terminal_failure, _terminal_detail,
 )
 
@@ -25,21 +24,6 @@ def _ok(stdout="OK", stderr=""):
 
 def _fail(stderr="error", stdout=""):
     return {"stdout": stdout, "stderr": stderr, "exit_code": 1, "command": ""}
-
-def _events_json(items: list) -> dict:
-    return {"stdout": json.dumps({"items": items}), "stderr": "", "exit_code": 0, "command": ""}
-
-def _warning_event(msg="crash", reason="OOMKilled", obj="myapp-xxx",
-                   minutes_ago: float = 1.0) -> dict:
-    ts = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    return {
-        "lastTimestamp": ts,
-        "reason": reason,
-        "message": msg,
-        "involvedObject": {"name": obj},
-    }
 
 
 # ── autouse: 기본 helm 디렉토리 생성 ─────────────────────────────────────────
@@ -58,11 +42,10 @@ def _default_helm_dir(tmp_path, monkeypatch):
 # ── 전체 성공 경로 ─────────────────────────────────────────────────────────────
 
 def test_all_pass_no_smoke(tmp_path):
-    """smoke test 없을 때 helm_install, kubectl_wait, kubectl_events pass + smoke skip."""
+    """smoke test 없을 때 helm_install, kubectl_wait pass + smoke skip."""
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()) as m_wait,
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])) as m_ev,
     ):
         result = run_runtime_phase1(SERVICE)
 
@@ -70,7 +53,6 @@ def test_all_pass_no_smoke(tmp_path):
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["helm_install"] == "pass"
     assert statuses["kubectl_wait"] == "pass"
-    assert statuses["kubectl_events"] == "pass"
     assert statuses["smoke_test"] == "skip"
 
     m_helm.assert_called_once_with(
@@ -84,10 +66,6 @@ def test_all_pass_no_smoke(tmp_path):
         label=f"app.kubernetes.io/name={SERVICE}",
         timeout="60s",
     )
-    m_ev.assert_called_once_with(
-        "gikview",
-        field_selector="type=Warning,involvedObject.kind=Pod",
-    )
 
 
 def test_all_pass_with_smoke(tmp_path, monkeypatch):
@@ -99,7 +77,6 @@ def test_all_pass_with_smoke(tmp_path, monkeypatch):
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
         patch("harness.tools.shell.run", return_value=_ok("smoke ok")) as m_smoke,
     ):
         result = run_runtime_phase1(SERVICE)
@@ -116,7 +93,6 @@ def test_all_pass_with_smoke(tmp_path, monkeypatch):
 
 def test_no_artifacts_fail(tmp_path, monkeypatch):
     """helm chart도 manifest dir도 없으면 즉시 fail."""
-    # autouse가 만든 helm dir 제거
     import shutil
     shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
 
@@ -130,7 +106,7 @@ def test_no_artifacts_fail(tmp_path, monkeypatch):
 # ── helm_install fail ─────────────────────────────────────────────────────────
 
 def test_helm_fail_skips_rest():
-    """helm install 일반 실패(immutable 아님) 시 나머지 3개 skip, passed=False."""
+    """helm install 일반 실패(immutable 아님) 시 나머지 skip, passed=False."""
     with patch("harness.tools.helm.upgrade_install", return_value=_fail("connection timed out")):
         result = run_runtime_phase1(SERVICE)
 
@@ -138,7 +114,6 @@ def test_helm_fail_skips_rest():
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["helm_install"] == "fail"
     assert statuses["kubectl_wait"] == "skip"
-    assert statuses["kubectl_events"] == "skip"
     assert statuses["smoke_test"] == "skip"
     helm_check = next(c for c in result["checks"] if c["name"] == "helm_install")
     assert "connection timed out" in helm_check["detail"]
@@ -154,7 +129,6 @@ def test_helm_immutable_uninstall_then_reinstall_success():
         patch("harness.tools.helm.upgrade_install", side_effect=install_responses) as m_helm,
         patch("harness.tools.helm.uninstall", return_value=_ok()) as m_uninstall,
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE)
 
@@ -192,7 +166,6 @@ def test_helm_immutable_reinstall_fails():
         patch("harness.tools.helm.upgrade_install", side_effect=install_responses),
         patch("harness.tools.helm.uninstall", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE)
 
@@ -205,78 +178,20 @@ def test_helm_immutable_reinstall_fails():
 
 # ── kubectl_wait fail ─────────────────────────────────────────────────────────
 
-def test_kubectl_wait_fail_still_collects_events():
-    """kubectl_wait 실패(non-terminal) 시에도 kubectl_events는 진단 정보를 위해 실행된다."""
+def test_kubectl_wait_fail_non_terminal():
+    """kubectl_wait 실패(non-terminal) 시 240s 추가 대기 후 fail, smoke skip."""
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
-        patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
+        patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])) as m_ev,
     ):
         result = run_runtime_phase1(SERVICE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_wait"] == "fail"
-    assert statuses["kubectl_events"] == "pass"   # events 실행됨, warning 없음
     assert statuses["smoke_test"] == "skip"
-    m_ev.assert_called_once()
-
-
-def test_kubectl_wait_fail_with_warning_events():
-    """kubectl_wait 실패(non-terminal) + warning 이벤트 존재 시 kubectl_events=fail."""
-    ev = _warning_event(msg="OOMKilled", reason="OOMKilling", minutes_ago=1.0)
-    with (
-        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
-        patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
-        patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([ev])),
-    ):
-        result = run_runtime_phase1(SERVICE)
-
-    assert result["passed"] is False
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["kubectl_wait"] == "fail"
-    assert statuses["kubectl_events"] == "fail"   # warning 발견
-    assert statuses["smoke_test"] == "skip"
-    ev_check = next(c for c in result["checks"] if c["name"] == "kubectl_events")
-    assert "OOMKilling" in ev_check["detail"]
-
-
-# ── kubectl_events: warning 있음 ──────────────────────────────────────────────
-
-def test_events_warning_recent_fail():
-    """최근 1분 내 warning → fail."""
-    ev = _warning_event(minutes_ago=1.0)
-
-    with (
-        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
-        patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([ev])),
-    ):
-        result = run_runtime_phase1(SERVICE)
-
-    assert result["passed"] is False
-    ev_check = next(c for c in result["checks"] if c["name"] == "kubectl_events")
-    assert ev_check["status"] == "fail"
-    assert "OOMKilled" in ev_check["detail"]
-    assert result["checks"][-1]["name"] == "smoke_test"
-    assert result["checks"][-1]["status"] == "skip"
-
-
-def test_events_warning_old_pass():
-    """10분 전 warning은 무시 → pass."""
-    ev = _warning_event(minutes_ago=10.0)
-
-    with (
-        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
-        patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([ev])),
-    ):
-        result = run_runtime_phase1(SERVICE)
-
-    ev_check = next(c for c in result["checks"] if c["name"] == "kubectl_events")
-    assert ev_check["status"] == "pass"
+    assert m_wait.call_count == 2  # 60s + 240s
 
 
 # ── smoke_test fail ───────────────────────────────────────────────────────────
@@ -289,7 +204,6 @@ def test_smoke_fail(tmp_path, monkeypatch):
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
         patch("harness.tools.shell.run", return_value=_fail("connection refused")),
     ):
         result = run_runtime_phase1(SERVICE)
@@ -311,7 +225,6 @@ def test_values_files_included_when_present(tmp_path, monkeypatch):
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         run_runtime_phase1(SERVICE)
 
@@ -329,7 +242,6 @@ def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         run_runtime_phase1(SERVICE)
 
@@ -349,7 +261,6 @@ def test_manifest_deploy_pass(tmp_path, monkeypatch):
 
     with (
         patch("harness.tools.kubectl.apply", return_value=_ok()) as m_apply,
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE)
 
@@ -357,7 +268,6 @@ def test_manifest_deploy_pass(tmp_path, monkeypatch):
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_apply"] == "pass"
     assert "kubectl_wait" not in statuses   # pod wait 없음
-    assert statuses["kubectl_events"] == "pass"
     assert statuses["smoke_test"] == "skip"
     m_apply.assert_called_once_with(
         str(tmp_path / "edge-server" / "manifests" / SERVICE),
@@ -377,7 +287,6 @@ def test_manifest_deploy_fail(tmp_path, monkeypatch):
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_apply"] == "fail"
-    assert statuses["kubectl_events"] == "skip"
     assert statuses["smoke_test"] == "skip"
 
 
@@ -389,29 +298,12 @@ def test_log_dir_saved(tmp_path):
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok("helm output")),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE, log_dir=log_dir)
 
     helm_check = next(c for c in result["checks"] if c["name"] == "helm_install")
     assert helm_check["log_path"] is not None
     assert Path(helm_check["log_path"]).exists()
-
-
-# ── _parse_warning_events 직접 테스트 ─────────────────────────────────────────
-
-def test_parse_events_kubectl_error():
-    r = {"stdout": "", "stderr": "connection refused", "exit_code": 1, "command": ""}
-    check = _parse_warning_events(r, log_dir=None)
-    assert check["status"] == "fail"
-    assert "connection refused" in check["detail"]
-
-
-def test_parse_events_invalid_json():
-    r = {"stdout": "not json", "stderr": "", "exit_code": 0, "command": ""}
-    check = _parse_warning_events(r, log_dir=None)
-    assert check["status"] == "fail"
-    assert "parse error" in check["detail"]
 
 
 # ── terminal 상태 감지 헬퍼 ──────────────────────────────────────────────────
@@ -461,7 +353,6 @@ def test_kubectl_wait_terminal_early_exit():
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_terminal("CrashLoopBackOff")),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE)
 
@@ -480,7 +371,6 @@ def test_kubectl_wait_pending_then_240s_pass():
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", side_effect=[_fail("timed out"), _ok()]) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE)
 
@@ -491,17 +381,15 @@ def test_kubectl_wait_pending_then_240s_pass():
 
 
 def test_kubectl_wait_pending_then_240s_fail():
-    """60s 후 Pending → 240s도 timeout → fail, events 수집."""
+    """60s 후 Pending → 240s도 timeout → fail."""
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
-        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
     ):
         result = run_runtime_phase1(SERVICE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_wait"] == "fail"
-    assert statuses["kubectl_events"] == "pass"
     assert m_wait.call_count == 2  # 60s + 240s
