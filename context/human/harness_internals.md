@@ -49,7 +49,7 @@ LLM은 다음을 **user message**로 받음:
 | Tech Stack | `context/inject/tech_stack.md` | 버전, 컴포넌트 정보 |
 | Cluster Environments | `config/cluster.yaml` → Python 코드 주입 | active 환경, dev/prod domain_suffix, arch |
 | Sub-Goal Specification | `context/phases/<phase>.md` 에서 sub_goal 섹션 추출 | 목표 사양, 인터페이스, 검증 명령어 등 |
-| Existing Files | `edge-server/{helm,manifests,docker,ebpf}/<service_name>/` 스캔 | 재시도 시 기존 파일 전체 내용 |
+| Existing Files | `edge-server/{helm,manifests,docker,ebpf}/<service_name>/` 스캔 | 파일 경로 목록만 주입. 내용은 `read_file` 툴로 조회 |
 | Dependency Services | sub_goal spec의 `dependency` 필드 파싱 | 의존 서비스명 목록 + kagent로 직접 조회 안내 |
 | Previous Verification Failure | state.verification | fail 체크 상세, LLM 제안 |
 | Additional Instructions | state.user_hint | 사람이 interrupt에서 입력한 지시 |
@@ -99,6 +99,11 @@ You MUST write `values-dev.yaml` AND `values-prod.yaml` for EVERY service.
 ### Tool loop
 
 최대 **10턴**. 초과 시 tools 없이 최종 응답 요청.
+
+### 사용 가능 툴
+
+- **kagent MCP** (`developer_tools`): `GetResources`, `GetResourceYAML`, `DescribeResource`, `GetPodLogs`, `GetRelease` 등 (read-only)
+- **`read_file`** (로컬): `edge-server/` 하위 파일 읽기. MCP 불필요. Existing Files 목록의 파일 내용 조회용.
 
 ### 허용 경로 (prefix guard)
 
@@ -174,6 +179,8 @@ LLM 없음. 결정적 실행.
 
 - kagent 도구: 읽기 전용 (`GetPodLogs`, `DescribeResource`, `GetEvents` 등)
 - 역할: 실패 원인 진단. pod 로그, 이벤트, describe로 root cause를 파악해 Developer에게 구체적 수정 지시 제공
+- user message에 서비스 아티팩트 파일 목록(`## Artifact Files`) 포함 → 제안 시 정확한 경로 참조 가능
+- 제안 형식: 파일 경로 + 정확한 YAML key + before→after 값 명시
 - 응답: `{"passed": false, "observations": [...], "suggestions": [...]}`
 - `passed`는 항상 `false` (Phase 1이 실패했으므로)
 - Tool loop 최대 **10턴**. 초과 시 tools 없이 최종 응답 요청.

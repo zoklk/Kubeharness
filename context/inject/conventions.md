@@ -145,6 +145,28 @@ metadata:
 | 중간 (grafana) | 128Mi | 256Mi | 100m | 500m |
 | 메인 (emqx, prometheus) | 256Mi | 512Mi | 200m | 1000m |
 
+## Kubernetes Env Var 상호참조
+
+Pod spec `env` 섹션에서 한 env var의 값을 다른 env var에서 참조할 때는 **Kubernetes 보간 문법** `$(VAR_NAME)`을 사용한다.
+
+```yaml
+env:
+  - name: POD_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: metadata.name
+  - name: EMQX_NODE__NAME
+    value: "emqx@$(POD_NAME).emqx-headless.gikview.svc.cluster.local"
+    #              ^^^^^^^^^^^ Kubernetes가 파드 기동 전에 치환
+```
+
+**주의사항**:
+- `$(VAR_NAME)` → ✅ Kubernetes env 보간. 파드 기동 전에 치환됨
+- `${VAR_NAME}` → ❌ 쉘 문법. Kubernetes는 치환하지 않음 (리터럴 그대로 전달)
+- `$(VAR_NAME)` in `command`/`args` 쉘 스크립트 → ❌ 쉘 command substitution으로 해석됨 (명령어 실행 시도)
+
+Downward API(metadata.name, metadata.namespace 등)도 동일하게 먼저 env로 정의 후 `$(VAR_NAME)`으로 참조한다.
+
 ## Probe
 
 - 모든 Deployment에 `readinessProbe`, `livenessProbe` 설정

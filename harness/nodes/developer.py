@@ -17,16 +17,17 @@ from pathlib import Path
 
 from rich.console import Console
 
-from harness.config import NAMESPACE, PROJECT_ROOT, all_envs, cluster_config
+from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, all_envs, cluster_config
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
+from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
 
 _console = Console()
 
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "harness" / "developer_prompt.md"
-_ALLOWED_PREFIX = "edge-server/"
+_ALLOWED_PREFIX = ARTIFACT_PREFIX
 _MAX_TOOL_TURNS = 10
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -230,71 +231,46 @@ def _extract_dependencies(sub_goal_spec: str) -> list[str]:
     return re.findall(r'`([^`]+)`', value)
 
 
-def _build_existing_files_section(service_name: str) -> str:
-    """
-    현재 서비스의 기존 파일 내용을 'Existing Files' 섹션으로 반환.
-    파일이 하나도 없으면 빈 문자열 반환.
-    """
-    def _read_dir(base_rel: str) -> list[tuple[str, str]]:
-        """base_rel(PROJECT_ROOT 상대) 하위 모든 파일을 (rel_path, content) 로 반환."""
-        base = PROJECT_ROOT / base_rel
-        if not base.is_dir():
-            return []
-        result = []
-        for p in sorted(base.rglob("*")):
-            if p.is_file():
-                rel = str(p.relative_to(PROJECT_ROOT))
-                try:
-                    result.append((rel, p.read_text(encoding="utf-8")))
-                except OSError:
-                    result.append((rel, "(read error)"))
-        return result
-
-    def _format_files(files: list[tuple[str, str]]) -> str:
-        parts = []
-        for rel, content in files:
-            parts.append(f"#### `{rel}`\n```\n{content}\n```")
-        return "\n\n".join(parts)
-
-    # 현재 서비스 디렉토리들 (dependency와 무관하게 항상 스캔)
-    current_files: list[tuple[str, str]] = []
-    for sub in ("helm", "manifests", "docker", "ebpf"):
-        current_files.extend(_read_dir(f"{_ALLOWED_PREFIX}{sub}/{service_name}"))
-
-    # 터미널 출력
-    if current_files:
-        _console.print(f"  [dim]Existing files injected into context ({len(current_files)}):[/dim]")
-        for rel, _ in current_files:
-            _console.print(f"    [green]✓[/green] {rel}")
-    else:
-        _console.print(f"  [dim]No existing files for '{service_name}' — fresh start[/dim]")
-
-    if not current_files:
-        return ""
-    return (
-        "## Existing Files\n\n"
-        f"### Current Service (`{service_name}`)\n\n"
-        + _format_files(current_files)
-    )
-
-
-def _collect_existing_files(service_name: str) -> list[str]:
-    """
-    LLM이 파일을 쓰지 않았을 때 폴백.
-    edge-server/{helm,manifests,docker}/<service_name>/ 디렉토리를 스캔해
-    PROJECT_ROOT 상대 경로 목록 반환.
-    """
-    candidates = [
-        PROJECT_ROOT / f"{_ALLOWED_PREFIX}{sub}/{service_name}"
-        for sub in ("helm", "manifests", "docker", "ebpf")
-    ]
+def _scan_service_files(service_name: str) -> list[str]:
+    """edge-server/{helm,manifests,docker,ebpf}/<service_name>/ 하위 파일 경로 목록 반환."""
     files: list[str] = []
-    for base in candidates:
+    for sub in ("helm", "manifests", "docker", "ebpf"):
+        base = PROJECT_ROOT / f"{_ALLOWED_PREFIX}{sub}/{service_name}"
         if base.is_dir():
             for p in sorted(base.rglob("*")):
                 if p.is_file():
                     files.append(str(p.relative_to(PROJECT_ROOT)))
     return files
+
+
+def _build_existing_files_section(service_name: str) -> str:
+    """
+    기존 파일 경로 목록을 'Existing Files' 섹션으로 반환.
+    파일 내용은 read_file 툴로 조회 — context 크기 절감.
+    파일이 하나도 없으면 빈 문자열 반환.
+    """
+    all_files = _scan_service_files(service_name)
+
+    if not all_files:
+        _console.print(f"  [dim]No existing files for '{service_name}' — fresh start[/dim]")
+        return ""
+
+    _console.print(f"  [dim]Existing files ({len(all_files)}) — use read_file tool to inspect:[/dim]")
+    for f in all_files:
+        _console.print(f"    [green]✓[/green] {f}")
+
+    file_list = "\n".join(f"- `{f}`" for f in all_files)
+    return (
+        "## Existing Files\n"
+        f"The following files exist for `{service_name}`. "
+        "Use the `read_file` tool to read their contents before writing.\n\n"
+        + file_list
+    )
+
+
+def _collect_existing_files(service_name: str) -> list[str]:
+    """LLM이 파일을 쓰지 않았을 때 폴백. _scan_service_files 위임."""
+    return _scan_service_files(service_name)
 
 
 # ── 파싱 및 파일 쓰기 ─────────────────────────────────────────────────────────
@@ -397,7 +373,9 @@ async def developer_node(state: HarnessState) -> dict:
         {"role": "user", "content": _build_user_message(state, sub_goal_spec, service_name)},
     ]
 
-    tool_objs, tools_dicts = await _load_tools()
+    kagent_objs, kagent_dicts = await _load_tools()
+    tool_objs = [*kagent_objs, ReadFileTool()]
+    tools_dicts = [*kagent_dicts, read_file_tool_dict()]
     messages = await run_tool_loop(messages, tools_dicts, tool_objs, max_turns=_MAX_TOOL_TURNS)
 
     final_content = messages[-1].get("content", "") if messages else ""

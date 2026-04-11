@@ -52,9 +52,18 @@ Your response must be a single JSON object. No prose outside it:
 
 ### Rules for `suggestions`
 
-- Concrete and actionable. The Developer node reads these as fix instructions.
-- Reference specific field names, values, or file paths when possible.
-- If the issue is a config value mismatch, state the correct value explicitly.
+Each suggestion MUST be precise enough for the Developer node to apply without guessing. Include:
+
+1. **Exact file path** — always use the full `edge-server/helm/<service>/...` path
+2. **Exact YAML key** — full dotted key or the line as it appears in the file
+3. **Current wrong value → correct value** — show the before/after explicitly
+
+| ❌ Vague (wrong) | ✅ Specific (correct) |
+|---|---|
+| "Change the DNS record type to SRV" | "In `edge-server/helm/emqx/values.yaml`, change `EMQX_CLUSTER__DNS__RECORD_TYPE: "a"` to `EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"`" |
+| "Fix the node name format" | "In `edge-server/helm/emqx/templates/statefulset.yaml` line ~56, change `replace \"__POD_NAME__\" \"${POD_NAME}\"` to `replace \"__POD_NAME__\" \"$(POD_NAME)\"`" |
+
+A list of artifact files (Helm, manifests, docker) for the service is provided in the user message under `## Artifact Files` — use those exact paths in your suggestions.
 
 ## Context you receive
 

@@ -95,6 +95,20 @@ async def _load_tools() -> tuple[list, list[dict]]:
         return [], []
 
 
+def _artifact_files_listing(service_name: str) -> str:
+    """Phase 2 LLM에게 서비스 아티팩트 파일 목록 제공 — 제안 시 정확한 파일 경로 참조용."""
+    all_files: list[str] = []
+    for sub in ("helm", "manifests", "docker"):
+        base = PROJECT_ROOT / f"edge-server/{sub}/{service_name}"
+        if base.is_dir():
+            for p in sorted(base.rglob("*")):
+                if p.is_file():
+                    all_files.append(str(p.relative_to(PROJECT_ROOT)))
+    if not all_files:
+        return ""
+    return "\n\n## Artifact Files\n" + "\n".join(f"- `{f}`" for f in all_files)
+
+
 def _phase1_summary(phase1: dict) -> str:
     """
     fail 항목은 detail 전체 노출, pass/skip은 이름만 표시.
@@ -196,9 +210,11 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
                 f"Phase: {sub_goal.get('phase', '')}\n\n"
                 + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
                 + _phase1_summary(phase1)
+                + _artifact_files_listing(service_name)
                 + "\n\nPhase 1 failed. Use the available tools to diagnose the root cause "
                   "(check pod logs, events, describe resources). "
                   "Identify why the deployment failed and provide actionable fix suggestions. "
+                  "Reference exact file paths and YAML keys from the Helm Chart Files list above. "
                   "Set passed=false in your response."
             ),
         },

@@ -13,6 +13,7 @@ _CONFIG_PATH = PROJECT_ROOT / "config" / "cluster.yaml"
 
 # 컨벤션 상수 — 하네스 전체에서 공유
 NAMESPACE = "gikview"
+ARTIFACT_PREFIX = "edge-server/"  # Developer가 쓸 수 있는 경로 prefix
 
 
 def release_name(service_name: str) -> str:
