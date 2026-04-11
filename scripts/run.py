@@ -24,6 +24,7 @@ import asyncio
 from typing import Any
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich import box
@@ -99,32 +100,10 @@ def _print_verification(state: HarnessState) -> None:
         for c in checks:
             s = c["status"]
             color = "green" if s == "pass" else ("yellow" if s == "skip" else "red")
-            t.add_row(c["name"], f"[{color}]{s}[/{color}]", c.get("detail", ""))
+            t.add_row(c["name"], f"[{color}]{s}[/{color}]", escape(c.get("detail", "")))
         console.print(t)
 
-    # runtime phase1
-    p1 = v.get("runtime_phase1", {})
-    if p1:
-        console.print("[bold]Runtime Phase 1[/bold]")
-        t = Table(box=box.SIMPLE, show_header=True)
-        t.add_column("check", style="dim")
-        t.add_column("status")
-        t.add_column("detail")
-        for c in p1.get("checks", []):
-            s = c["status"]
-            color = "green" if s == "pass" else ("yellow" if s == "skip" else "red")
-            t.add_row(c["name"], f"[{color}]{s}[/{color}]", c.get("detail", ""))
-        console.print(t)
-
-    # runtime phase2
-    p2 = v.get("runtime_phase2", {})
-    if p2:
-        p2_status = "[green]pass[/green]" if p2.get("passed") else "[red]fail[/red]"
-        console.print(f"[bold]Runtime Phase 2[/bold]: {p2_status}")
-        for obs in p2.get("observations", []):
-            console.print(f"  [dim]{obs.get('area','')}[/dim]: {obs.get('finding','')}")
-        for sug in p2.get("suggestions", []):
-            console.print(f"  [yellow]→ {sug}[/yellow]")
+    # runtime phase1/2 는 runtime_verifier_node가 완료 직후 직접 출력
 
 
 def _print_artifacts(state: HarnessState) -> None:

@@ -204,8 +204,13 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
         ]
 
         # immutable field 감지 시 uninstall 후 재설치
+        # "immutable": generic k8s field, "forbidden: updates to statefulset spec": PVC/volumeClaimTemplates 변경
         r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
-        if r["exit_code"] != 0 and "immutable" in (r["stderr"] + r["stdout"]).lower():
+        output_lower = (r["stderr"] + r["stdout"]).lower()
+        if r["exit_code"] != 0 and (
+            "immutable" in output_lower
+            or ("forbidden" in output_lower and "statefulset spec" in output_lower)
+        ):
             uninstall_r = helm.uninstall(rname, NAMESPACE)
             uninstall_check = _from_run("helm_uninstall_immutable", uninstall_r, log_dir)
             checks.append(uninstall_check)

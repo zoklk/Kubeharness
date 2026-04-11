@@ -18,11 +18,41 @@ import re
 from pathlib import Path
 from typing import Any
 
+from rich import box
+from rich.console import Console
+from rich.markup import escape
+from rich.table import Table
+
 from harness.config import PROJECT_ROOT
 from harness.llm import client as llm
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 from harness.verifiers.runtime_gates import run_runtime_phase1
+
+_console = Console()
+
+
+def _print_phase1(phase1: dict) -> None:
+    t = Table(box=box.SIMPLE, show_header=True)
+    t.add_column("check", style="dim")
+    t.add_column("status")
+    t.add_column("detail")
+    for c in phase1.get("checks", []):
+        s = c["status"]
+        color = "green" if s == "pass" else ("yellow" if s == "skip" else "red")
+        t.add_row(c["name"], f"[{color}]{s}[/{color}]", escape(c.get("detail", "")))
+    _console.print("[bold]Runtime Phase 1[/bold]")
+    _console.print(t)
+
+
+def _print_phase2(phase2: dict) -> None:
+    p2_status = "[green]pass[/green]" if phase2.get("passed") else "[red]fail[/red]"
+    _console.print(f"[bold]Runtime Phase 2[/bold]: {p2_status}")
+    for obs in phase2.get("observations", []):
+        _console.print(f"  [dim]{escape(obs.get('area',''))}[/dim]: {escape(obs.get('finding',''))}")
+    for sug in phase2.get("suggestions", []):
+        _console.print(f"  [yellow]→ {escape(sug)}[/yellow]")
+
 
 _PROMPT_PATH = PROJECT_ROOT / "context" / "harness" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 5
@@ -116,6 +146,13 @@ async def _run_tool_loop(
             messages.append({"role": "assistant", "content": resp.get("content", "")})
             return messages
 
+        # ── tool call 터미널 출력 ──────────────────────────────────────────────
+        for tc in resp["tool_calls"]:
+            preview = json.dumps(tc.get("input", {}), ensure_ascii=False)
+            if len(preview) > 120:
+                preview = preview[:117] + "..."
+            _console.print(f"  [dim cyan]⟳ tool[/dim cyan] [bold]{tc['name']}[/bold]  [dim]{preview}[/dim]")
+
         # assistant turn (gemini raw content 포함)
         assistant_msg: dict[str, Any] = {
             "role": "assistant",
@@ -192,10 +229,13 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     runtime_log_dir = _log_dir(state, "runtime")
     log_dir_base = str(Path(runtime_log_dir).parent) + "/"
 
+    _console.print(f"\n[cyan]⟳[/cyan]  Runtime Verifier  [{service_name}]  Phase 1 ...")
+
     # ── Phase 1 (subprocess → to_thread으로 이벤트 루프 블로킹 방지) ──────────
     phase1 = await asyncio.to_thread(
         run_runtime_phase1, service_name, log_dir=runtime_log_dir
     )
+    _print_phase1(phase1)
 
     if phase1["passed"]:
         # Phase 1 완전 통과 (smoke test 포함) — LLM 진단 불필요
@@ -212,6 +252,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
         }
 
     # ── Phase 2 (LLM 진단) — Phase 1 fail 시에만 실행 ───────────────────────
+    _console.print(f"  [yellow]Phase 1 failed — starting LLM diagnosis ...[/yellow]")
     sub_goal_spec = state.get("sub_goal_spec", "")
     messages = [
         {"role": "system", "content": _load_system_prompt()},
@@ -235,6 +276,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
 
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)
+    _print_phase2(phase2)
 
     return {
         "current_sub_goal": {**sub_goal, "stage": "runtime_verify"},
