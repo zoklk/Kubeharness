@@ -207,6 +207,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
         }
 
     # ── Phase 2 (LLM) ────────────────────────────────────────────────────────
+    sub_goal_spec = state.get("sub_goal_spec", "")
     messages = [
         {"role": "system", "content": _load_system_prompt()},
         {
@@ -214,6 +215,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
             "content": (
                 f"Service: {service_name}\n"
                 f"Phase: {sub_goal.get('phase', '')}\n\n"
+                + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
                 + _phase1_summary(phase1)
                 + "\n\nAnalyze the deployment using available tools, "
                   "then provide your assessment as JSON."

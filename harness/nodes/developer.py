@@ -282,6 +282,8 @@ async def developer_node(state: HarnessState) -> dict:
     LangGraph 노드. async 선언으로 상위 이벤트 루프에서 안전하게 await 가능.
 
     재시도 감지: verification이 존재하고 passed=False이면 error_count 증가.
+    sub_goal_spec을 state에 캐시하여 하위 노드(runtime_verifier)에서 재사용 가능.
+    user_hint는 사용 후 state에서 소거(빈 문자열)하여 다음 재시도에 누적되지 않도록 함.
     """
     sub_goal = state["current_sub_goal"]
     error_count = state.get("error_count", 0)
@@ -290,6 +292,10 @@ async def developer_node(state: HarnessState) -> dict:
     verification = state.get("verification")
     if verification is not None and not verification.get("passed"):
         error_count += 1
+
+    # sub_goal_spec 추출 및 캐시 (runtime_verifier Phase 2에서 재사용)
+    phase_md = _read_context(f"phases/{sub_goal['phase']}.md")
+    sub_goal_spec = _extract_subgoal_section(phase_md, sub_goal["name"])
 
     messages = [
         {"role": "system", "content": _load_system_prompt()},
@@ -313,4 +319,6 @@ async def developer_node(state: HarnessState) -> dict:
         "current_sub_goal": {**sub_goal, "stage": "dev"},
         "dev_artifacts": {"files": written_files, "notes": notes},
         "error_count": error_count,
+        "sub_goal_spec": sub_goal_spec,
+        "user_hint": "",  # 이번 시도에서 소비한 hint 소거 — 다음 재시도에 누적 방지
     }
