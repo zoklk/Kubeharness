@@ -43,7 +43,7 @@ def _log_dir(state: HarnessState, sub: str) -> str:
     phase = state.get("current_phase", "unknown")
     name = state["current_sub_goal"]["name"]
     attempt = state.get("error_count", 0)
-    return f"logs/raw/{phase}/{name}/attempt_{attempt}/{sub}"
+    return str(PROJECT_ROOT / f"logs/raw/{phase}/{name}/attempt_{attempt}/{sub}")
 
 
 def _load_system_prompt() -> str:

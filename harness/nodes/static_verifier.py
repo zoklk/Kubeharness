@@ -23,42 +23,43 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 # ── artifacts 식별 ────────────────────────────────────────────────────────────
 
 def _chart_path(service_name: str) -> str:
-    return f"edge-server/helm/{service_name}"
+    return str(PROJECT_ROOT / f"edge-server/helm/{service_name}")
 
 
 def _manifest_dir(service_name: str) -> str:
-    return f"edge-server/manifests/{service_name}"
+    return str(PROJECT_ROOT / f"edge-server/manifests/{service_name}")
 
 
 def _values_files(chart_path: str) -> list[str]:
-    """존재하는 values 파일만 반환. CWD 무관하게 PROJECT_ROOT 기준으로 확인."""
+    """존재하는 values 파일만 반환 (chart_path는 절대 경로)."""
     return [
         vf for vf in [
             f"{chart_path}/values.yaml",
             f"{chart_path}/values-dev.yaml",
         ]
-        if (PROJECT_ROOT / vf).exists()
+        if Path(vf).exists()
     ]
 
 
 def _has_helm(files: list[str], service_name: str) -> bool:
-    prefix = f"{_chart_path(service_name)}/"
+    # files는 edge-server/ 상대 경로이므로 prefix 검사도 상대 경로로
+    prefix = f"edge-server/helm/{service_name}/"
     return any(f.startswith(prefix) for f in files)
 
 
 def _has_manifests(files: list[str], service_name: str) -> bool:
-    prefix = f"{_manifest_dir(service_name)}/"
+    prefix = f"edge-server/manifests/{service_name}/"
     return any(f.startswith(prefix) for f in files)
 
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
 
 def _log_dir(state: HarnessState) -> str:
-    """phase/sub_goal/attempt_N 구조로 로그 경로 생성. 재시도 시에도 일관성 유지."""
+    """phase/sub_goal/attempt_N 구조로 로그 경로 생성. 절대 경로 반환."""
     phase = state.get("current_phase", "unknown")
     name = state["current_sub_goal"]["name"]
     attempt = state.get("error_count", 0)
-    return f"logs/raw/{phase}/{name}/attempt_{attempt}/static"
+    return str(PROJECT_ROOT / f"logs/raw/{phase}/{name}/attempt_{attempt}/static")
 
 
 def static_verifier_node(state: HarnessState) -> dict:

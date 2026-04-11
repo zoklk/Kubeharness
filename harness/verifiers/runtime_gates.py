@@ -100,18 +100,16 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
     Returns:
         {"passed": bool, "checks": [{"name", "status", "detail", "log_path"}, ...]}
     """
-    chart_path = f"edge-server/helm/{service_name}"
+    chart_path = str(PROJECT_ROOT / f"edge-server/helm/{service_name}")
     release_name = f"{service_name}-dev-v1"
     label_selector = f"app.kubernetes.io/name={service_name}"
-    smoke_test_path = Path(f"edge-server/scripts/smoke-test-{service_name}.sh")
+    smoke_test_path = PROJECT_ROOT / f"edge-server/scripts/smoke-test-{service_name}.sh"
 
-    # values.yaml 필수, values-dev.yaml 있으면 포함 (PROJECT_ROOT 기준으로 확인)
+    # values.yaml 필수, values-dev.yaml 있으면 포함
     values_files = [
-        vf for vf in [
-            f"{chart_path}/values.yaml",
-            f"{chart_path}/values-dev.yaml",
-        ]
-        if (PROJECT_ROOT / vf).exists()
+        str(PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}")
+        for vf in ["values.yaml", "values-dev.yaml"]
+        if (PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}").exists()
     ]
 
     checks = []
@@ -139,14 +137,14 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
         checks.append(_skip("smoke_test"))
         return {"passed": False, "checks": checks}
 
-    # ④ smoke test (PROJECT_ROOT 기준으로 확인)
-    if (PROJECT_ROOT / smoke_test_path).exists():
+    # ④ smoke test
+    if smoke_test_path.exists():
         r = shell.run(["bash", str(smoke_test_path)])
         checks.append(_from_run("smoke_test", r, log_dir))
         if checks[-1]["status"] == "fail":
             return {"passed": False, "checks": checks}
     else:
         checks.append(_result("smoke_test", "skip",
-                               f"no smoke test at {smoke_test_path}", log_dir))
+                               f"no smoke test at {smoke_test_path.relative_to(PROJECT_ROOT)}", log_dir))
 
     return {"passed": True, "checks": checks}

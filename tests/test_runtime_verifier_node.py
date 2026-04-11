@@ -13,6 +13,7 @@ from harness.nodes.runtime_verifier import (
     runtime_verifier_node,
     _parse_phase2,
     _phase1_summary,
+    PROJECT_ROOT,
 )
 
 SERVICE = "myapp"
@@ -78,7 +79,7 @@ async def test_phase1_fail_skips_phase2():
     ):
         result = await runtime_verifier_node(_state())
 
-    m_p1.assert_called_once_with(SERVICE, log_dir="logs/raw/test/myapp/attempt_0/runtime")
+    m_p1.assert_called_once_with(SERVICE, log_dir=str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_0/runtime"))
     m_tools.assert_not_called()
     m_chat.assert_not_called()
 
@@ -325,7 +326,7 @@ async def test_log_dir_format():
     ):
         result = await runtime_verifier_node(_state(error_count=2))
 
-    assert result["verification"]["log_dir"] == "logs/raw/test/myapp/attempt_2/"
+    assert result["verification"]["log_dir"] == str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_2") + "/"
 
 
 @pytest.mark.asyncio
@@ -335,7 +336,7 @@ async def test_log_dir_phase1_fail():
                return_value=_phase1_fail()):
         result = await runtime_verifier_node(_state(error_count=1))
 
-    assert result["verification"]["log_dir"] == "logs/raw/test/myapp/attempt_1/"
+    assert result["verification"]["log_dir"] == str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_1") + "/"
 
 
 # ── _parse_phase2 직접 테스트 ─────────────────────────────────────────────────

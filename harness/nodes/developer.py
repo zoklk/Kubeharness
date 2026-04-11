@@ -133,6 +133,10 @@ def _build_user_message(state: HarnessState) -> str:
             + _verification_summary(verification)
         )
 
+    user_hint = state.get("user_hint", "")
+    if user_hint:
+        parts.append(f"## Additional Instructions from Operator\n{user_hint}")
+
     return "\n\n---\n\n".join(parts)
 
 

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from harness.verifiers.runtime_gates import run_runtime_phase1, _parse_warning_events
+from harness.verifiers.runtime_gates import run_runtime_phase1, _parse_warning_events, PROJECT_ROOT
 
 SERVICE = "myapp"
 
@@ -58,7 +58,7 @@ def test_all_pass_no_smoke():
     # 명령 인자 검증
     m_helm.assert_called_once_with(
         f"{SERVICE}-dev-v1",
-        f"edge-server/helm/{SERVICE}",
+        str(PROJECT_ROOT / f"edge-server/helm/{SERVICE}"),
         "gikview",
         [],  # 실제 프로젝트에 edge-server/helm/myapp/values.yaml 없음
     )

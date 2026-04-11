@@ -6,7 +6,7 @@ static.check_* 함수를 mock해서 노드 로직만 검증.
 from unittest.mock import patch, call
 import pytest
 
-from harness.nodes.static_verifier import static_verifier_node
+from harness.nodes.static_verifier import static_verifier_node, PROJECT_ROOT
 
 SERVICE = "myapp"
 
@@ -104,7 +104,7 @@ def test_helm_chart_path_passed_to_checks(tmp_path, monkeypatch):
     ):
         static_verifier_node(_state(HELM_FILES))
 
-    expected_chart = f"edge-server/helm/{SERVICE}"
+    expected_chart = str(PROJECT_ROOT / f"edge-server/helm/{SERVICE}")
     expected_release = f"{SERVICE}-dev-v1"
 
     assert m_yl.call_args[0][0] == expected_chart
@@ -157,7 +157,7 @@ def test_manifest_dir_passed_to_checks(tmp_path, monkeypatch):
     ):
         static_verifier_node(_state(MANIFEST_FILES))
 
-    expected_dir = f"edge-server/manifests/{SERVICE}"
+    expected_dir = str(PROJECT_ROOT / f"edge-server/manifests/{SERVICE}")
     assert m_yl.call_args[0][0] == expected_dir
     assert m_kc.call_args[0][0] == expected_dir
     assert m_kd.call_args[0][0] == expected_dir
@@ -228,7 +228,7 @@ def test_state_fields_set(tmp_path, monkeypatch):
     assert "checks" in v
     assert "log_dir" in v
     # logs/raw/{phase}/{sub_goal}/attempt_{error_count}/
-    assert v["log_dir"] == f"logs/raw/test/{SERVICE}/attempt_0/"
+    assert v["log_dir"] == str(PROJECT_ROOT / f"logs/raw/test/{SERVICE}/attempt_0") + "/"
 
     # static_verification 키 존재
     assert "checks" in result["static_verification"]
