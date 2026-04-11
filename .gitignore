@@ -26,3 +26,5 @@ htmlcov/
 # 런타임 로그 (구조는 유지, 내용은 제외)
 logs/raw/*
 !logs/raw/.gitkeep
+
+context/
