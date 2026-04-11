@@ -18,12 +18,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from harness.config import PROJECT_ROOT
 from harness.llm import client as llm
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 from harness.verifiers.runtime_gates import run_runtime_phase1
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _PROMPT_PATH = PROJECT_ROOT / "context" / "harness" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 5
 

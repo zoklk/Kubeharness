@@ -6,10 +6,23 @@ config/cluster.yaml의 active 환경 설정을 읽어 반환.
 from pathlib import Path
 import yaml
 
-_CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "cluster.yaml"
+# 프로젝트 루트 — 하네스 전체에서 공유 (harness/config.py → harness/ → GikView/)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+_CONFIG_PATH = PROJECT_ROOT / "config" / "cluster.yaml"
 
 # 컨벤션 상수 — 하네스 전체에서 공유
 NAMESPACE = "gikview"
+
+
+def release_name(service_name: str) -> str:
+    """Helm release 이름 컨벤션: <service>-dev-v1"""
+    return f"{service_name}-dev-v1"
+
+
+def label_selector(service_name: str) -> str:
+    """kubectl label selector 컨벤션: app.kubernetes.io/name=<service>"""
+    return f"app.kubernetes.io/name={service_name}"
 
 _DEFAULTS = {
     "domain_suffix": "cluster.local",

@@ -11,12 +11,9 @@ Static Verifier 노드. LLM 없음, 순수 결정적.
 from pathlib import Path
 from typing import Optional
 
-from harness.config import NAMESPACE
+from harness.config import NAMESPACE, PROJECT_ROOT, label_selector, release_name
 from harness.state import HarnessState
 from harness.verifiers import static
-
-# 프로젝트 루트: harness/nodes/ → harness/ → GikView/
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 # ── artifacts 식별 ────────────────────────────────────────────────────────────
@@ -92,17 +89,17 @@ def static_verifier_node(state: HarnessState) -> dict:
     # ② helm chart 체크
     if _has_helm(files, service_name):
         chart_path = _chart_path(service_name)
-        release_name = f"{service_name}-dev-v1"
+        rname = release_name(service_name)
         vf = _values_files(chart_path)
 
         checks.append(static.check_yamllint(chart_path, log_dir=log_dir))
         checks.append(static.check_helm_lint(chart_path, vf, log_dir=log_dir))
         checks.append(static.check_helm_template_kubeconform(
-            chart_path, release_name, NAMESPACE, vf, log_dir=log_dir))
+            chart_path, rname, NAMESPACE, vf, log_dir=log_dir))
         checks.append(static.check_trivy_config(chart_path, log_dir=log_dir))
         checks.append(static.check_gitleaks(chart_path, log_dir=log_dir))
         checks.append(static.check_helm_dry_run_server(
-            chart_path, release_name, NAMESPACE, vf, log_dir=log_dir))
+            chart_path, rname, NAMESPACE, vf, log_dir=log_dir))
 
     # ③ raw manifest 체크
     if _has_manifests(files, service_name):

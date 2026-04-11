@@ -19,14 +19,13 @@ from typing import Any
 
 from rich.console import Console
 
-from harness.config import NAMESPACE, all_envs, cluster_config
+from harness.config import NAMESPACE, PROJECT_ROOT, all_envs, cluster_config
 from harness.llm import client as llm
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 
 _console = Console()
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "harness" / "developer_prompt.md"
 _ALLOWED_PREFIX = "edge-server/"

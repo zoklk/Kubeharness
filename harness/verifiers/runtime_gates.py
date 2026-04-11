@@ -21,11 +21,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
-from harness.config import NAMESPACE
+from harness.config import NAMESPACE, PROJECT_ROOT, label_selector, release_name
 from harness.tools import helm, kubectl, shell
 
-# 프로젝트 루트: harness/verifiers/ → harness/ → GikView/
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
 
 
@@ -150,8 +148,8 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
 
     chart_path = str(PROJECT_ROOT / f"edge-server/helm/{service_name}")
     manifest_dir = str(PROJECT_ROOT / f"edge-server/manifests/{service_name}")
-    release_name = f"{service_name}-dev-v1"
-    label_selector = f"app.kubernetes.io/name={service_name}"
+    rname = release_name(service_name)
+    lsel = label_selector(service_name)
     smoke_test_path = PROJECT_ROOT / f"edge-server/scripts/smoke-test-{service_name}.sh"
 
     has_helm = Path(chart_path).is_dir()
@@ -206,16 +204,16 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
         ]
 
         # immutable field 감지 시 uninstall 후 재설치
-        r = helm.upgrade_install(release_name, chart_path, NAMESPACE, values_files)
+        r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
         if r["exit_code"] != 0 and "immutable" in (r["stderr"] + r["stdout"]).lower():
-            uninstall_r = helm.uninstall(release_name, NAMESPACE)
+            uninstall_r = helm.uninstall(rname, NAMESPACE)
             uninstall_check = _from_run("helm_uninstall_immutable", uninstall_r, log_dir)
             checks.append(uninstall_check)
             if uninstall_check["status"] == "fail":
                 checks += [_skip("helm_install"), _skip("kubectl_wait"),
                            _skip("kubectl_events"), _skip("smoke_test")]
                 return {"passed": False, "checks": checks}
-            r = helm.upgrade_install(release_name, chart_path, NAMESPACE, values_files)
+            r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
 
         checks.append(_from_run("helm_install", r, log_dir))
         if checks[-1]["status"] == "fail":
@@ -224,11 +222,9 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
 
         # ④ kubectl wait pods (helm only — manifest/CRD는 pod 없음)
         # 300s: StatefulSet 이미지 풀 + 순차 기동 감안
-        r = kubectl.wait("pods", "Ready", NAMESPACE, label=label_selector, timeout="300s")
-        status = "pass" if r["exit_code"] == 0 else "fail"
-        detail = (r["stdout"] + r["stderr"]).strip() or "OK"
-        checks.append(_result("kubectl_wait", status, detail, log_dir, r["stdout"] + r["stderr"]))
-        if status == "fail":
+        r = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="300s")
+        checks.append(_from_run("kubectl_wait", r, log_dir))
+        if checks[-1]["status"] == "fail":
             # kubectl_events는 진단 정보를 위해 계속 실행 (Phase 2 LLM에 전달)
             r = kubectl.get_events(NAMESPACE, field_selector="type=Warning,involvedObject.kind=Pod")
             checks.append(_parse_warning_events(r, log_dir))
