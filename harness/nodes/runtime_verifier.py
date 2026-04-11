@@ -16,7 +16,6 @@ import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 from rich import box
 from rich.console import Console
@@ -24,7 +23,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from harness.config import PROJECT_ROOT
-from harness.llm import client as llm
+from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 from harness.verifiers.runtime_gates import run_runtime_phase1
@@ -80,7 +79,8 @@ def _log_dir(state: HarnessState, sub: str) -> str:
 
 def _load_system_prompt() -> str:
     if _PROMPT_PATH.exists():
-        return _PROMPT_PATH.read_text(encoding="utf-8")
+        content = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+        return content if content else _DEFAULT_SYSTEM_PROMPT
     return _DEFAULT_SYSTEM_PROMPT
 
 
@@ -110,73 +110,6 @@ def _phase1_summary(phase1: dict) -> str:
         else:  # skip
             lines.append(f"- [SKIP] {c['name']}")
     return "\n".join(lines)
-
-
-async def _execute_tools_parallel(tool_calls: list[dict], tool_map: dict) -> list[tuple[dict, str]]:
-    """LLM이 요청한 tool_calls를 asyncio.gather로 병렬 실행."""
-    async def _exec_one(tc: dict) -> tuple[dict, str]:
-        tool = tool_map.get(tc["name"])
-        if tool is None:
-            return tc, f"Unknown tool: {tc['name']}"
-        try:
-            return tc, str(await tool.ainvoke(tc["input"]))
-        except Exception as e:
-            return tc, f"Tool error: {e}"
-
-    return list(await asyncio.gather(*[_exec_one(tc) for tc in tool_calls]))
-
-
-async def _run_tool_loop(
-    messages: list[dict],
-    tools: list[dict],
-    tool_objs: list,
-) -> list[dict]:
-    """
-    LLM이 tool_calls를 반환하는 동안 실행 루프.
-    한 턴에 여러 tool_calls가 있으면 asyncio.gather로 병렬 실행.
-    최대 _MAX_TOOL_TURNS 회 후 tools 없이 최종 응답 요청.
-    항상 마지막 메시지가 role=assistant인 상태로 반환.
-    """
-    tool_map = {t.name: t for t in tool_objs}
-
-    for _ in range(_MAX_TOOL_TURNS):
-        resp = llm.chat(messages, tools=tools or None)  # sync; blocks loop but acceptable
-
-        if not resp.get("tool_calls"):
-            messages.append({"role": "assistant", "content": resp.get("content", "")})
-            return messages
-
-        # ── tool call 터미널 출력 ──────────────────────────────────────────────
-        for tc in resp["tool_calls"]:
-            preview = json.dumps(tc.get("input", {}), ensure_ascii=False)
-            if len(preview) > 120:
-                preview = preview[:117] + "..."
-            _console.print(f"  [dim cyan]⟳ tool[/dim cyan] [bold]{tc['name']}[/bold]  [dim]{preview}[/dim]")
-
-        # assistant turn (gemini raw content 포함)
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": resp.get("content", ""),
-            "tool_calls": resp["tool_calls"],
-        }
-        if "_gemini_raw_content" in resp:
-            assistant_msg["_gemini_raw_content"] = resp["_gemini_raw_content"]
-        messages.append(assistant_msg)
-
-        # 모든 tool_calls를 한 번에 병렬 실행 (await, 이벤트 루프 양보)
-        results = await _execute_tools_parallel(resp["tool_calls"], tool_map)
-        for tc, result_str in results:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "name": tc["name"],
-                "content": result_str,
-            })
-
-    # max turns 초과 → tools 없이 최종 응답 요청
-    resp = llm.chat(messages)
-    messages.append({"role": "assistant", "content": resp.get("content", "")})
-    return messages
 
 
 def _parse_phase2(content: str) -> dict:
@@ -272,7 +205,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     ]
 
     tool_objs, tools_dicts = await _load_tools()
-    messages = await _run_tool_loop(messages, tools_dicts, tool_objs)
+    messages = await run_tool_loop(messages, tools_dicts, tool_objs, max_turns=_MAX_TOOL_TURNS)
 
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)

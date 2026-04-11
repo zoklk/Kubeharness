@@ -22,17 +22,22 @@ from harness.nodes.developer import developer_node
 from harness.nodes.static_verifier import static_verifier_node
 from harness.nodes.runtime_verifier import runtime_verifier_node
 
+# ── 노드 이름 상수 — run.py 등 외부에서 import해 raw string 의존 제거 ──────────
+NODE_DEVELOPER = "developer"
+NODE_STATIC_VERIFIER = "static_verifier"
+NODE_RUNTIME_VERIFIER = "runtime_verifier"
+
 
 # ── 라우팅 함수 ───────────────────────────────────────────────────────────────
 
 def _route_after_static(state: HarnessState) -> str:
     v = state.get("static_verification", {}) or {}
-    return "runtime_verifier" if v.get("passed") else "developer"
+    return NODE_RUNTIME_VERIFIER if v.get("passed") else NODE_DEVELOPER
 
 
 def _route_after_runtime(state: HarnessState) -> str:
     v = state.get("verification", {}) or {}
-    return END if v.get("passed") else "developer"
+    return END if v.get("passed") else NODE_DEVELOPER
 
 
 # ── 그래프 빌더 ───────────────────────────────────────────────────────────────
@@ -50,28 +55,28 @@ def build_graph() -> "CompiledGraph":  # type: ignore[name-defined]
     """
     g = StateGraph(HarnessState)
 
-    g.add_node("developer", developer_node)
-    g.add_node("static_verifier", static_verifier_node)
-    g.add_node("runtime_verifier", runtime_verifier_node)
+    g.add_node(NODE_DEVELOPER, developer_node)
+    g.add_node(NODE_STATIC_VERIFIER, static_verifier_node)
+    g.add_node(NODE_RUNTIME_VERIFIER, runtime_verifier_node)
 
-    g.set_entry_point("developer")
+    g.set_entry_point(NODE_DEVELOPER)
 
-    g.add_edge("developer", "static_verifier")
+    g.add_edge(NODE_DEVELOPER, NODE_STATIC_VERIFIER)
 
     g.add_conditional_edges(
-        "static_verifier",
+        NODE_STATIC_VERIFIER,
         _route_after_static,
-        {"runtime_verifier": "runtime_verifier", "developer": "developer"},
+        {NODE_RUNTIME_VERIFIER: NODE_RUNTIME_VERIFIER, NODE_DEVELOPER: NODE_DEVELOPER},
     )
 
     g.add_conditional_edges(
-        "runtime_verifier",
+        NODE_RUNTIME_VERIFIER,
         _route_after_runtime,
-        {END: END, "developer": "developer"},
+        {END: END, NODE_DEVELOPER: NODE_DEVELOPER},
     )
 
     return g.compile(
-        interrupt_before=["developer"],
-        interrupt_after=["runtime_verifier"],
+        interrupt_before=[NODE_DEVELOPER],
+        interrupt_after=[NODE_RUNTIME_VERIFIER],
         checkpointer=MemorySaver(),
     )

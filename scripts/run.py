@@ -29,7 +29,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from harness.graph import build_graph
+from harness.graph import build_graph, NODE_DEVELOPER, NODE_RUNTIME_VERIFIER
 from harness.state import HarnessState
 
 from dotenv import load_dotenv  # .env 읽기
@@ -270,7 +270,7 @@ async def main() -> None:
         # interrupt_before["developer"]      → writes에 runtime_verifier 없음
         # interrupt_after["runtime_verifier"] → writes에 "runtime_verifier" 있음
         last_writes: dict = (snapshot.metadata or {}).get("writes", {})
-        after_runtime = "runtime_verifier" in last_writes
+        after_runtime = NODE_RUNTIME_VERIFIER in last_writes
 
         if after_runtime:
             # ── interrupt_after["runtime_verifier"] ───────────────────────────
@@ -293,7 +293,7 @@ async def main() -> None:
             _print_artifacts(snapshot.values)
             break
 
-        elif snapshot.next[0] == "developer":
+        elif snapshot.next[0] == NODE_DEVELOPER:
             # ── interrupt_before["developer"] ────────────────────────────────
             should_continue, hint = _handle_developer_interrupt(
                 snapshot.values,

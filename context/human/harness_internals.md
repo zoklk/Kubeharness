@@ -49,7 +49,7 @@ LLM은 다음을 **user message**로 받음:
 | Tech Stack | `context/inject/tech_stack.md` | 버전, 컴포넌트 정보 |
 | Cluster Environments | `config/cluster.yaml` → Python 코드 주입 | active 환경, dev/prod domain_suffix, arch |
 | Sub-Goal Specification | `context/phases/<phase>.md` 에서 sub_goal 섹션 추출 | 목표 사양, 인터페이스, 검증 명령어 등 |
-| Existing Files | `edge-server/{helm,manifests,docker}/<service_name>/` 스캔 | 재시도 시 기존 파일 전체 내용 |
+| Existing Files | `edge-server/{helm,manifests,docker,ebpf}/<service_name>/` 스캔 | 재시도 시 기존 파일 전체 내용 |
 | Dependency Services | sub_goal spec의 `dependency` 필드 파싱 | 의존 서비스명 목록 + kagent로 직접 조회 안내 |
 | Previous Verification Failure | state.verification | fail 체크 상세, LLM 제안 |
 | Additional Instructions | state.user_hint | 사람이 interrupt에서 입력한 지시 |
@@ -95,6 +95,10 @@ You MUST write `values-dev.yaml` AND `values-prod.yaml` for EVERY service.
   "notes": "..."
 }
 ```
+
+### Tool loop
+
+최대 **10턴**. 초과 시 tools 없이 최종 응답 요청.
 
 ### 허용 경로 (prefix guard)
 
@@ -144,7 +148,7 @@ LLM 없음. 결정적 실행.
 
 | 단계 | 조건 | 동작 |
 |------|------|------|
-| docker build+push | `edge-server/docker/<service>/Dockerfile` 존재 | 빌드 후 GHCR 푸시 |
+| docker build+push | `edge-server/docker/<service>/Dockerfile` 존재 | `config/build.yaml`의 `registry`로 빌드 후 푸시 |
 | helm upgrade --install | `edge-server/helm/<service>/` 존재 | `--wait` 없음 (빠른 적용) |
 | kubectl apply | `edge-server/manifests/<service>/` 존재 (helm 없을 때) | |
 | kubectl wait pods | helm 경로일 때만 | `--timeout=300s`, label=`app.kubernetes.io/name=<service>` |
@@ -153,7 +157,9 @@ LLM 없음. 결정적 실행.
 
 **values 파일**: `values.yaml` + `values-{active}.yaml` (static_verifier와 동일 로직)
 
-**immutable field 복구**: helm fail + stderr에 "immutable" 포함 → helm uninstall → 재설치
+**immutable field 복구**: helm fail 시 아래 조건 중 하나 → helm uninstall → 재설치
+- stderr/stdout에 `"immutable"` 포함 (일반적인 k8s immutable field 오류)
+- stderr/stdout에 `"forbidden"` AND `"statefulset spec"` 포함 (volumeClaimTemplates 변경 등)
 
 **주의**: Helm은 `--wait` 없이 실행 (빠른 적용). 파드 Ready 게이트는 `kubectl wait --timeout=300s`.
 
@@ -165,6 +171,7 @@ LLM 없음. 결정적 실행.
 - 역할: 실패 원인 진단. pod 로그, 이벤트, describe로 root cause를 파악해 Developer에게 구체적 수정 지시 제공
 - 응답: `{"passed": false, "observations": [...], "suggestions": [...]}`
 - `passed`는 항상 `false` (Phase 1이 실패했으므로)
+- Tool loop 최대 **5턴**. 초과 시 tools 없이 최종 응답 요청.
 
 ### 라우팅
 
@@ -177,7 +184,10 @@ LLM 없음. 결정적 실행.
 
 developer 노드가 `context/phases/<phase>.md`에서 sub_goal 섹션을 추출하는 방법:
 
-- `## Sub_goal: <id>` 헤딩부터 다음 같은 레벨 헤딩 직전까지
+- **Fuzzy matching**: 헤딩(# ~ ####)의 텍스트에 `sub_goal name`이 포함되면 매칭. 대소문자 무시.
+  - 예) `## 1. emqx 설치` → `"emqx"` 키워드로 매칭 성공
+- 매칭된 헤딩과 동일 레벨 이상의 다음 헤딩 직전까지 섹션으로 추출. 하위 헤딩(###)은 포함.
+- 못 찾으면 파일 전체를 반환.
 - `**service_name**:` 필드 → helm/manifest/docker/smoke 경로의 기준
 - `**dependency**:` 필드 → 의존 서비스명 파싱 (`` `name` `` 형식)
 - service_name 못 찾으면 sub_goal name으로 폴백

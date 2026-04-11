@@ -11,16 +11,14 @@ Developer 노드.
 6. dev_artifacts 업데이트 반환
 """
 
-import asyncio
 import json
 import re
 from pathlib import Path
-from typing import Any
 
 from rich.console import Console
 
 from harness.config import NAMESPACE, PROJECT_ROOT, all_envs, cluster_config
-from harness.llm import client as llm
+from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 
@@ -36,8 +34,8 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Write manifests or Helm charts according to the provided specifications. "
     "Use available tools to inspect cluster state as needed. "
     "Respond ONLY with valid JSON matching this schema exactly:\n"
-    '{"files": [{"path": "edge-server/...", "content": "..."}], "notes": "..."}\n'
-    "All file paths MUST start with edge-server/. "
+    f'{{"files": [{{"path": "{_ALLOWED_PREFIX}...", "content": "..."}}], "notes": "..."}}\n'
+    f"All file paths MUST start with {_ALLOWED_PREFIX}. "
     "Do not include any text outside the JSON object."
 )
 
@@ -215,68 +213,6 @@ async def _load_tools() -> tuple[list, list[dict]]:
         return [], []
 
 
-# ── tool loop ─────────────────────────────────────────────────────────────────
-
-async def _execute_tools_parallel(
-    tool_calls: list[dict], tool_map: dict
-) -> list[tuple[dict, str]]:
-    async def _exec_one(tc: dict) -> tuple[dict, str]:
-        tool = tool_map.get(tc["name"])
-        if tool is None:
-            return tc, f"Unknown tool: {tc['name']}"
-        try:
-            return tc, str(await tool.ainvoke(tc["input"]))
-        except Exception as e:
-            return tc, f"Tool error: {e}"
-
-    return list(await asyncio.gather(*[_exec_one(tc) for tc in tool_calls]))
-
-
-async def _run_tool_loop(
-    messages: list[dict],
-    tools: list[dict],
-    tool_objs: list,
-) -> list[dict]:
-    tool_map = {t.name: t for t in tool_objs}
-
-    for _ in range(_MAX_TOOL_TURNS):
-        resp = llm.chat(messages, tools=tools or None)
-
-        if not resp.get("tool_calls"):
-            messages.append({"role": "assistant", "content": resp.get("content", "")})
-            return messages
-
-        # ── tool call 터미널 출력 ──────────────────────────────────────────────
-        for tc in resp["tool_calls"]:
-            preview = json.dumps(tc.get("input", {}), ensure_ascii=False)
-            if len(preview) > 120:
-                preview = preview[:117] + "..."
-            _console.print(f"  [dim cyan]⟳ tool[/dim cyan] [bold]{tc['name']}[/bold]  [dim]{preview}[/dim]")
-
-        assistant_msg: dict[str, Any] = {
-            "role": "assistant",
-            "content": resp.get("content", ""),
-            "tool_calls": resp["tool_calls"],
-        }
-        if "_gemini_raw_content" in resp:
-            assistant_msg["_gemini_raw_content"] = resp["_gemini_raw_content"]
-        messages.append(assistant_msg)
-
-        results = await _execute_tools_parallel(resp["tool_calls"], tool_map)
-        for tc, result_str in results:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "name": tc["name"],
-                "content": result_str,
-            })
-
-    # max turns 초과 → tools 없이 최종 응답 요청
-    resp = llm.chat(messages)
-    messages.append({"role": "assistant", "content": resp.get("content", "")})
-    return messages
-
-
 # ── 컨텍스트 보강 ────────────────────────────────────────────────────────────
 
 def _extract_dependencies(sub_goal_spec: str) -> list[str]:
@@ -323,7 +259,7 @@ def _build_existing_files_section(service_name: str) -> str:
     # 현재 서비스 디렉토리들 (dependency와 무관하게 항상 스캔)
     current_files: list[tuple[str, str]] = []
     for sub in ("helm", "manifests", "docker", "ebpf"):
-        current_files.extend(_read_dir(f"edge-server/{sub}/{service_name}"))
+        current_files.extend(_read_dir(f"{_ALLOWED_PREFIX}{sub}/{service_name}"))
 
     # 터미널 출력
     if current_files:
@@ -349,10 +285,8 @@ def _collect_existing_files(service_name: str) -> list[str]:
     PROJECT_ROOT 상대 경로 목록 반환.
     """
     candidates = [
-        PROJECT_ROOT / f"edge-server/helm/{service_name}",
-        PROJECT_ROOT / f"edge-server/manifests/{service_name}",
-        PROJECT_ROOT / f"edge-server/docker/{service_name}",
-        PROJECT_ROOT / f"edge-server/ebpf/{service_name}",
+        PROJECT_ROOT / f"{_ALLOWED_PREFIX}{sub}/{service_name}"
+        for sub in ("helm", "manifests", "docker", "ebpf")
     ]
     files: list[str] = []
     for base in candidates:
@@ -464,7 +398,7 @@ async def developer_node(state: HarnessState) -> dict:
     ]
 
     tool_objs, tools_dicts = await _load_tools()
-    messages = await _run_tool_loop(messages, tools_dicts, tool_objs)
+    messages = await run_tool_loop(messages, tools_dicts, tool_objs, max_turns=_MAX_TOOL_TURNS)
 
     final_content = messages[-1].get("content", "") if messages else ""
     artifacts = _parse_artifacts(final_content)

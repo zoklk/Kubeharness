@@ -9,7 +9,6 @@ Static Verifier 노드. LLM 없음, 순수 결정적.
 """
 
 from pathlib import Path
-from typing import Optional
 
 from harness.config import NAMESPACE, PROJECT_ROOT, label_selector, release_name
 from harness.state import HarnessState
