@@ -1,5 +1,5 @@
 provider: gemini           # anthropic | openai_compat | gemini
 endpoint: ""               # openai_compat일 때만 사용
 api_key_env: GEMINI_API_KEY
-model: gemini-3-flash-preview
+model: gemma-4-31b-it
 temperature: 0.1

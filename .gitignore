@@ -28,3 +28,10 @@ logs/raw/*
 !logs/raw/.gitkeep
 
 context/
+
+# 환경별 클러스터 설정 (kubeconfig 경로 등 로컬 환경 종속)
+# kubeconfig경로를 담기위한 파일이지만 현재 코드에서는 .kube에서 직접 참조중
+config/cluster.yaml
+
+# 임시 스크립트
+check_gemini_model.py
