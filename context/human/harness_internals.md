@@ -151,7 +151,7 @@ LLM 없음. 결정적 실행.
 | docker build+push | `edge-server/docker/<service>/Dockerfile` 존재 | `config/build.yaml`의 `registry`로 빌드 후 푸시 |
 | helm upgrade --install | `edge-server/helm/<service>/` 존재 | `--wait` 없음 (빠른 적용) |
 | kubectl apply | `edge-server/manifests/<service>/` 존재 (helm 없을 때) | |
-| kubectl wait pods | helm 경로일 때만 | `--timeout=300s`, label=`app.kubernetes.io/name=<service>` |
+| kubectl wait pods | helm 경로일 때만 | **2단계**: 60s 대기 → terminal 상태 감지 → terminal이면 즉시 fail / 아니면 240s 추가 대기 |
 | kubectl events | Warning 이벤트 최근 5분 | **kubectl_wait 실패 시에도 실행** (진단 정보 수집) |
 | smoke test | `edge-server/scripts/smoke-test-<service_name>.sh` 존재 시 | kubectl_wait 실패 시 skip |
 
@@ -161,7 +161,12 @@ LLM 없음. 결정적 실행.
 - stderr/stdout에 `"immutable"` 포함 (일반적인 k8s immutable field 오류)
 - stderr/stdout에 `"forbidden"` AND `"statefulset spec"` 포함 (volumeClaimTemplates 변경 등)
 
-**주의**: Helm은 `--wait` 없이 실행 (빠른 적용). 파드 Ready 게이트는 `kubectl wait --timeout=300s`.
+**kubectl wait 2단계 상세**:
+- 60s 경과 후 pod 상태 확인 (`kubectl get pods -o json`)
+- terminal 상태(`CrashLoopBackOff`, `ImagePullBackOff`, `ErrImagePull`, `Error`, `OOMKilled` 등): 즉시 fail (조기 종료)
+- 기동 중(`Pending`, `Init`, `ContainerCreating` 등): 240s 추가 대기 (총 최대 300s)
+
+**주의**: Helm은 `--wait` 없이 실행 (빠른 적용). 파드 Ready 게이트는 `kubectl wait` 2단계.
 
 ### Phase 2 (LLM 진단)
 
@@ -171,7 +176,7 @@ LLM 없음. 결정적 실행.
 - 역할: 실패 원인 진단. pod 로그, 이벤트, describe로 root cause를 파악해 Developer에게 구체적 수정 지시 제공
 - 응답: `{"passed": false, "observations": [...], "suggestions": [...]}`
 - `passed`는 항상 `false` (Phase 1이 실패했으므로)
-- Tool loop 최대 **5턴**. 초과 시 tools 없이 최종 응답 요청.
+- Tool loop 최대 **10턴**. 초과 시 tools 없이 최종 응답 요청.
 
 ### 라우팅
 

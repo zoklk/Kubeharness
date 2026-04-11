@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 import pytest
 
-from harness.verifiers.runtime_gates import run_runtime_phase1, _parse_warning_events
+from harness.verifiers.runtime_gates import (
+    run_runtime_phase1, _parse_warning_events,
+    _is_terminal_failure, _terminal_detail,
+)
 
 SERVICE = "myapp"
 
@@ -79,7 +82,7 @@ def test_all_pass_no_smoke(tmp_path):
     m_wait.assert_called_once_with(
         "pods", "Ready", "gikview",
         label=f"app.kubernetes.io/name={SERVICE}",
-        timeout="300s",
+        timeout="60s",
     )
     m_ev.assert_called_once_with(
         "gikview",
@@ -203,10 +206,11 @@ def test_helm_immutable_reinstall_fails():
 # ── kubectl_wait fail ─────────────────────────────────────────────────────────
 
 def test_kubectl_wait_fail_still_collects_events():
-    """kubectl_wait 실패 시에도 kubectl_events는 진단 정보를 위해 실행된다."""
+    """kubectl_wait 실패(non-terminal) 시에도 kubectl_events는 진단 정보를 위해 실행된다."""
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
+        patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
         patch("harness.tools.kubectl.get_events", return_value=_events_json([])) as m_ev,
     ):
         result = run_runtime_phase1(SERVICE)
@@ -220,11 +224,12 @@ def test_kubectl_wait_fail_still_collects_events():
 
 
 def test_kubectl_wait_fail_with_warning_events():
-    """kubectl_wait 실패 + warning 이벤트 존재 시 kubectl_events=fail."""
+    """kubectl_wait 실패(non-terminal) + warning 이벤트 존재 시 kubectl_events=fail."""
     ev = _warning_event(msg="OOMKilled", reason="OOMKilling", minutes_ago=1.0)
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")),
+        patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
         patch("harness.tools.kubectl.get_events", return_value=_events_json([ev])),
     ):
         result = run_runtime_phase1(SERVICE)
@@ -407,3 +412,96 @@ def test_parse_events_invalid_json():
     check = _parse_warning_events(r, log_dir=None)
     assert check["status"] == "fail"
     assert "parse error" in check["detail"]
+
+
+# ── terminal 상태 감지 헬퍼 ──────────────────────────────────────────────────
+
+def _pods_json_pending() -> dict:
+    """ContainerCreating — terminal 아님, 정상 기동 중."""
+    items = [{"metadata": {"name": "pod-0"}, "status": {"containerStatuses": [
+        {"name": "app", "state": {"waiting": {"reason": "ContainerCreating"}}, "ready": False}
+    ]}}]
+    return {"exit_code": 0, "stdout": json.dumps({"items": items}), "stderr": "", "command": ""}
+
+
+def _pods_json_terminal(reason: str = "CrashLoopBackOff") -> dict:
+    """terminal 상태 pod."""
+    items = [{"metadata": {"name": "pod-0"}, "status": {"containerStatuses": [
+        {"name": "app", "state": {"waiting": {"reason": reason, "message": "back-off 5m0s restarting"}}, "ready": False}
+    ]}}]
+    return {"exit_code": 0, "stdout": json.dumps({"items": items}), "stderr": "", "command": ""}
+
+
+# ── _is_terminal_failure / _terminal_detail 직접 테스트 ──────────────────────
+
+def test_is_terminal_failure_crashloop():
+    assert _is_terminal_failure(_pods_json_terminal("CrashLoopBackOff")) is True
+
+def test_is_terminal_failure_imagepull():
+    assert _is_terminal_failure(_pods_json_terminal("ImagePullBackOff")) is True
+
+def test_is_terminal_failure_pending_is_false():
+    assert _is_terminal_failure(_pods_json_pending()) is False
+
+def test_is_terminal_failure_kubectl_error():
+    r = {"exit_code": 1, "stdout": "", "stderr": "connection refused", "command": ""}
+    assert _is_terminal_failure(r) is False
+
+def test_terminal_detail_includes_reason():
+    detail = _terminal_detail(_pods_json_terminal("CrashLoopBackOff"))
+    assert "CrashLoopBackOff" in detail
+    assert "pod-0" in detail
+
+
+# ── 2단계 kubectl wait 통합 테스트 ──────────────────────────────────────────
+
+def test_kubectl_wait_terminal_early_exit():
+    """60s 후 CrashLoopBackOff → 조기 종료, 240s wait 없음."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
+        patch("harness.tools.kubectl.get_pods", return_value=_pods_json_terminal("CrashLoopBackOff")),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "fail"
+    wait_detail = next(c["detail"] for c in result["checks"] if c["name"] == "kubectl_wait")
+    assert "early exit" in wait_detail
+    assert "CrashLoopBackOff" in wait_detail
+    m_wait.assert_called_once()   # 60s 호출 1회, 240s 없음
+
+
+def test_kubectl_wait_pending_then_240s_pass():
+    """60s 후 Pending(non-terminal) → 240s 추가 대기 → 통과."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", side_effect=[_fail("timed out"), _ok()]) as m_wait,
+        patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "pass"
+    assert m_wait.call_count == 2  # 60s + 240s
+
+
+def test_kubectl_wait_pending_then_240s_fail():
+    """60s 후 Pending → 240s도 timeout → fail, events 수집."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
+        patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "fail"
+    assert statuses["kubectl_events"] == "pass"
+    assert m_wait.call_count == 2  # 60s + 240s

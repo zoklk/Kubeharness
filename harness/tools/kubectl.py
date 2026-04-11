@@ -33,6 +33,13 @@ def wait(
     return run(cmd, timeout=int(timeout.rstrip("s")) + 10)
 
 
+def get_pods(namespace: str, label: str = "") -> dict:
+    cmd = ["kubectl", "get", "pods", "-n", namespace, "-o", "json"]
+    if label:
+        cmd += ["-l", label]
+    return run(cmd)
+
+
 def get_events(namespace: str, field_selector: str = "") -> dict:
     cmd = ["kubectl", "get", "events", "-n", namespace, "-o", "json"]
     if field_selector:

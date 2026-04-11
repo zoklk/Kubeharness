@@ -83,14 +83,15 @@ def _print_header(phase: str, sub_goal: str) -> None:
 
 
 def _print_verification(state: HarnessState) -> None:
+    """static 단계 검증 결과 출력. runtime은 runtime_verifier_node가 직접 출력."""
     v = state.get("verification") or {}
+    if v.get("stage") != "static":
+        return
+
     passed = v.get("passed", False)
-    stage = v.get("stage", "unknown")
     status_str = "[green]PASS[/green]" if passed else "[red]FAIL[/red]"
+    console.print(f"\n[bold]Static Verification[/bold]: {status_str}")
 
-    console.print(f"\n[bold]Verification Result[/bold]: {status_str}  (stage: {stage})")
-
-    # static checks
     checks = v.get("checks", [])
     if checks:
         t = Table(box=box.SIMPLE, show_header=True)
@@ -102,8 +103,6 @@ def _print_verification(state: HarnessState) -> None:
             color = "green" if s == "pass" else ("yellow" if s == "skip" else "red")
             t.add_row(c["name"], f"[{color}]{s}[/{color}]", escape(c.get("detail", "")))
         console.print(t)
-
-    # runtime phase1/2 는 runtime_verifier_node가 완료 직후 직접 출력
 
 
 def _print_artifacts(state: HarnessState) -> None:
@@ -182,8 +181,6 @@ def _handle_runtime_interrupt(state: HarnessState, skip: bool) -> bool:
     Returns:
         should_continue — False이면 run.py가 중단.
     """
-    _print_verification(state)
-
     v = state.get("verification") or {}
     passed = v.get("passed", False)
 

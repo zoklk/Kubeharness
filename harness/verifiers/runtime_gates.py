@@ -26,6 +26,12 @@ from harness.tools import helm, kubectl, shell
 
 _BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
 
+# pod가 이 상태이면 기다려도 복구 불가 → 조기 종료
+_TERMINAL_STATES = frozenset({
+    "CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull",
+    "Error", "OOMKilled", "InvalidImageName", "CreateContainerConfigError",
+})
+
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
@@ -85,6 +91,49 @@ def _run_docker_build(
     r = shell.run(["docker", "push", tag])
     push_check = _from_run("docker_push", r, log_dir)
     return [build_check, push_check]
+
+
+# ── Terminal 상태 감지 ────────────────────────────────────────────────────────
+
+def _is_terminal_failure(pods_r: dict) -> bool:
+    """pod 중 하나라도 terminal 상태이면 True. kubectl get pods 실패 시 False."""
+    if pods_r["exit_code"] != 0:
+        return False
+    try:
+        items = json.loads(pods_r["stdout"]).get("items", [])
+    except (json.JSONDecodeError, AttributeError):
+        return False
+    if not items:
+        return False
+    for pod in items:
+        for cs in pod.get("status", {}).get("containerStatuses", []):
+            if cs.get("state", {}).get("waiting", {}).get("reason", "") in _TERMINAL_STATES:
+                return True
+            if cs.get("state", {}).get("terminated", {}).get("reason", "") in _TERMINAL_STATES:
+                return True
+    return False
+
+
+def _terminal_detail(pods_r: dict) -> str:
+    """terminal 상태 pod/container 요약 (최대 3건)."""
+    try:
+        items = json.loads(pods_r["stdout"]).get("items", [])
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    parts = []
+    for pod in items:
+        pname = pod.get("metadata", {}).get("name", "?")
+        for cs in pod.get("status", {}).get("containerStatuses", []):
+            waiting = cs.get("state", {}).get("waiting", {})
+            reason = waiting.get("reason", "")
+            if reason in _TERMINAL_STATES:
+                msg = waiting.get("message", "")[:80]
+                parts.append(f"{pname}: {reason}" + (f" ({msg})" if msg else ""))
+            terminated = cs.get("state", {}).get("terminated", {})
+            treason = terminated.get("reason", "")
+            if treason in _TERMINAL_STATES:
+                parts.append(f"{pname}: terminated/{treason}")
+    return "; ".join(parts[:3])
 
 
 # ── 이벤트 파싱 ───────────────────────────────────────────────────────────────
@@ -225,10 +274,23 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
             checks += [_skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
             return {"passed": False, "checks": checks}
 
-        # ④ kubectl wait pods (helm only — manifest/CRD는 pod 없음)
-        # 300s: StatefulSet 이미지 풀 + 순차 기동 감안
-        r = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="300s")
-        checks.append(_from_run("kubectl_wait", r, log_dir))
+        # ④ kubectl wait pods — 2단계: 60s 조기 감지 + 240s 잔여 대기
+        # 60s 후 terminal 상태(CrashLoopBackOff 등)면 즉시 fail (300s 낭비 방지)
+        # 아직 기동 중(Pending/Init)이면 잔여 240s 대기
+        r60 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="60s")
+        if r60["exit_code"] == 0:
+            checks.append(_from_run("kubectl_wait", r60, log_dir))
+        else:
+            pods_r = kubectl.get_pods(NAMESPACE, label=lsel)
+            if _is_terminal_failure(pods_r):
+                detail = _terminal_detail(pods_r) or (r60["stderr"] or r60["stdout"]).strip() or "terminal failure after 60s"
+                checks.append(_result("kubectl_wait", "fail",
+                                      f"early exit: {detail}",
+                                      log_dir, r60["stdout"] + r60["stderr"]))
+            else:
+                r240 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="240s")
+                checks.append(_from_run("kubectl_wait", r240, log_dir))
+
         if checks[-1]["status"] == "fail":
             # kubectl_events는 진단 정보를 위해 계속 실행 (Phase 2 LLM에 전달)
             r = kubectl.get_events(NAMESPACE, field_selector="type=Warning,involvedObject.kind=Pod")
