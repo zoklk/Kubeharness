@@ -702,15 +702,13 @@ def test_extract_service_name_fallback_on_empty_spec():
 # ── _build_user_message 컨텍스트 포함 여부 ────────────────────────────────────
 
 def test_build_user_message_contains_target(tmp_path, monkeypatch):
-    """user message에 phase, sub_goal name 포함."""
+    """user message에 phase, sub_goal name, spec 포함."""
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
     (tmp_path / "conventions.md").write_text("conv", encoding="utf-8")
     (tmp_path / "tech_stack.md").write_text("tech", encoding="utf-8")
-    phases_dir = tmp_path / "phases"
-    phases_dir.mkdir()
-    (phases_dir / f"{PHASE}.md").write_text(f"## {SERVICE}\nSpec here.", encoding="utf-8")
 
-    msg = _build_user_message(_state())
+    sub_goal_spec = "Spec here."
+    msg = _build_user_message(_state(), sub_goal_spec, SERVICE)
     assert f"Phase: {PHASE}" in msg
     assert f"Sub-Goal: {SERVICE}" in msg
     assert "Spec here." in msg
@@ -721,8 +719,50 @@ def test_build_user_message_contains_target(tmp_path, monkeypatch):
 def test_build_user_message_missing_context_shows_placeholder(tmp_path, monkeypatch):
     """context 파일 없으면 placeholder 포함."""
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
-    # phases 디렉토리도 없음
 
-    msg = _build_user_message(_state())
+    msg = _build_user_message(_state(), "", SERVICE)
     assert "[conventions.md not found]" in msg
     assert "[tech_stack.md not found]" in msg
+
+
+def test_build_user_message_cluster_environments_present(tmp_path, monkeypatch):
+    """user message에 Cluster Environments 섹션과 active 환경이 포함된다."""
+    monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
+
+    msg = _build_user_message(_state(), "", SERVICE)
+    assert "Cluster Environments" in msg
+    assert "Active for testing" in msg
+    # dev, prod 두 환경 모두 표시
+    assert "values-dev.yaml" in msg
+    assert "values-prod.yaml" in msg
+
+
+def test_build_user_message_generic_dns_example(tmp_path, monkeypatch):
+    """DNS 예시가 서비스명 하드코딩 없이 <service>-headless 형식이다."""
+    monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
+
+    msg = _build_user_message(_state(), "", SERVICE)
+    # emqx-headless처럼 특정 서비스가 하드코딩되면 안 됨
+    assert "emqx-headless" not in msg
+    assert "<service>-headless" in msg
+
+
+def test_build_user_message_domain_suffix_in_env_section(tmp_path, monkeypatch):
+    """Cluster Environments 섹션에 domain_suffix가 표시된다."""
+    from unittest.mock import patch as _patch
+    monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
+
+    fake_envs = {
+        "dev": {"domain_suffix": "test.local", "arch": "amd64", "kubeconfig": ""},
+        "prod": {"domain_suffix": "cluster.local", "arch": "arm64", "kubeconfig": ""},
+    }
+    fake_active = {"domain_suffix": "test.local", "arch": "amd64", "_active": "dev"}
+
+    with (
+        _patch("harness.nodes.developer.all_envs", return_value=fake_envs),
+        _patch("harness.nodes.developer.cluster_config", return_value=fake_active),
+    ):
+        msg = _build_user_message(_state(), "", SERVICE)
+
+    assert "test.local" in msg
+    assert "cluster.local" in msg

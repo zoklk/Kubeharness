@@ -230,8 +230,11 @@ def test_state_fields_set(tmp_path, monkeypatch):
     # logs/raw/{phase}/{sub_goal}/attempt_{error_count}/
     assert v["log_dir"] == str(PROJECT_ROOT / f"logs/raw/test/{SERVICE}/attempt_0") + "/"
 
-    # static_verification 키 존재
-    assert "checks" in result["static_verification"]
+    # static_verification 키 존재 및 passed 포함 확인
+    sv = result["static_verification"]
+    assert "checks" in sv
+    assert "passed" in sv
+    assert sv["passed"] is True
 
     # sub_goal stage 업데이트
     assert result["current_sub_goal"]["stage"] == "static_verify"
@@ -280,3 +283,88 @@ def test_service_name_overrides_name_for_path(tmp_path, monkeypatch):
     assert m_yl.call_args[0][0] == expected_chart
     assert m_htk.call_args[0][1] == expected_release
     assert result["verification"]["passed"] is True
+
+
+# ── static_verification 필드 ────────────────────────────────────────────────
+
+def test_static_verification_has_passed_field(tmp_path, monkeypatch):
+    """static_verification dict에 passed 필드가 존재하고 routing에 사용 가능."""
+    monkeypatch.chdir(tmp_path)
+
+    with patch.multiple("harness.verifiers.static",
+                        check_path_prefix=lambda *a, **kw: _pass("path_prefix"),
+                        check_yamllint=lambda *a, **kw: _pass("yamllint"),
+                        check_helm_lint=lambda *a, **kw: _pass("helm_lint"),
+                        check_helm_template_kubeconform=lambda *a, **kw: _pass("htk"),
+                        check_trivy_config=lambda *a, **kw: _pass("trivy_config"),
+                        check_gitleaks=lambda *a, **kw: _pass("gitleaks"),
+                        check_helm_dry_run_server=lambda *a, **kw: _pass("hd")):
+        result = static_verifier_node(_state(HELM_FILES))
+
+    assert result["static_verification"]["passed"] is True
+
+
+def test_static_verification_passed_false_on_fail(tmp_path, monkeypatch):
+    """체크 실패 시 static_verification.passed=False."""
+    monkeypatch.chdir(tmp_path)
+
+    with patch.multiple("harness.verifiers.static",
+                        check_path_prefix=lambda *a, **kw: _pass("path_prefix"),
+                        check_yamllint=lambda *a, **kw: _fail("yamllint", "indent error"),
+                        check_helm_lint=lambda *a, **kw: _pass("helm_lint"),
+                        check_helm_template_kubeconform=lambda *a, **kw: _pass("htk"),
+                        check_trivy_config=lambda *a, **kw: _pass("trivy_config"),
+                        check_gitleaks=lambda *a, **kw: _pass("gitleaks"),
+                        check_helm_dry_run_server=lambda *a, **kw: _pass("hd")):
+        result = static_verifier_node(_state(HELM_FILES))
+
+    assert result["static_verification"]["passed"] is False
+    # verification.passed와 일치
+    assert result["static_verification"]["passed"] == result["verification"]["passed"]
+
+
+# ── _values_files active env ─────────────────────────────────────────────────
+
+def test_values_files_uses_active_env_dev(tmp_path):
+    """active=dev이면 values-dev.yaml을 선택한다."""
+    from harness.nodes.static_verifier import _values_files
+
+    (tmp_path / "values.yaml").write_text("x: 1\n")
+    (tmp_path / "values-dev.yaml").write_text("x: 2\n")
+    (tmp_path / "values-prod.yaml").write_text("x: 3\n")
+
+    with patch("harness.config.cluster_config", return_value={"_active": "dev"}):
+        result = _values_files(str(tmp_path))
+
+    assert str(tmp_path / "values.yaml") in result
+    assert str(tmp_path / "values-dev.yaml") in result
+    assert str(tmp_path / "values-prod.yaml") not in result
+
+
+def test_values_files_uses_active_env_prod(tmp_path):
+    """active=prod이면 values-prod.yaml을 선택하고 values-dev.yaml은 제외."""
+    from harness.nodes.static_verifier import _values_files
+
+    (tmp_path / "values.yaml").write_text("x: 1\n")
+    (tmp_path / "values-dev.yaml").write_text("x: 2\n")
+    (tmp_path / "values-prod.yaml").write_text("x: 3\n")
+
+    with patch("harness.config.cluster_config", return_value={"_active": "prod"}):
+        result = _values_files(str(tmp_path))
+
+    assert str(tmp_path / "values.yaml") in result
+    assert str(tmp_path / "values-prod.yaml") in result
+    assert str(tmp_path / "values-dev.yaml") not in result
+
+
+def test_values_files_missing_env_file_excluded(tmp_path):
+    """active 환경의 values 파일이 없으면 목록에서 제외된다."""
+    from harness.nodes.static_verifier import _values_files
+
+    (tmp_path / "values.yaml").write_text("x: 1\n")
+    # values-dev.yaml 없음
+
+    with patch("harness.config.cluster_config", return_value={"_active": "dev"}):
+        result = _values_files(str(tmp_path))
+
+    assert result == [str(tmp_path / "values.yaml")]
