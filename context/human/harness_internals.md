@@ -98,7 +98,7 @@ You MUST write `values-dev.yaml` AND `values-prod.yaml` for EVERY service.
 
 ### Tool loop
 
-최대 **10턴**. 초과 시 tools 없이 최종 응답 요청.
+최대 **20턴**. 초과 시 tools 없이 최종 응답 요청.
 
 ### 사용 가능 툴
 

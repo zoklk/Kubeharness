@@ -28,26 +28,23 @@ class ReadFileTool:
 
 def read_file_tool_dict() -> dict:
     return {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": (
-                "Read a file from the repository. "
-                "Use this to inspect existing Helm chart files, values files, or templates "
-                "before writing your output. Path must start with 'edge-server/'."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": (
-                            "File path relative to project root. "
-                            "Example: 'edge-server/helm/emqx/values.yaml'"
-                        ),
-                    }
-                },
-                "required": ["path"],
+        "name": "read_file",
+        "description": (
+            "Read a file from the repository. "
+            "Use this to inspect existing Helm chart files, values files, or templates "
+            "before writing your output. Path must start with 'edge-server/'."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "File path relative to project root. "
+                        "Example: 'edge-server/helm/emqx/values.yaml'"
+                    ),
+                }
             },
+            "required": ["path"],
         },
     }

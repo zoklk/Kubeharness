@@ -28,7 +28,7 @@ _console = Console()
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "harness" / "developer_prompt.md"
 _ALLOWED_PREFIX = ARTIFACT_PREFIX
-_MAX_TOOL_TURNS = 10
+_MAX_TOOL_TURNS = 20
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are an expert Kubernetes and Helm developer. "
