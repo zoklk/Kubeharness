@@ -19,5 +19,7 @@ runtime_verifier_tools:
   - k8s_get_events
   - k8s_get_pod_logs
   - k8s_check_service_connectivity
+  - k8s_patch_resource
+  - k8s_rollout
   - helm_get_release
   - helm_list_releases

@@ -201,11 +201,12 @@ def _build_user_message(state: HarnessState, sub_goal_spec: str, service_name: s
 # ── tools ─────────────────────────────────────────────────────────────────────
 
 async def _load_tools() -> tuple[list, list[dict]]:
-    """kagent developer_tools 로드. 실패 시 빈 리스트로 graceful degradation."""
+    """kagent developer_tools 로드. 실패 시 경고 후 빈 리스트로 graceful degradation."""
     try:
         tool_objs = await get_kagent_tools("developer_tools")
         return tool_objs, tools_as_chat_dicts(tool_objs)
-    except Exception:
+    except Exception as e:
+        _console.print(f"  [yellow]⚠ kagent tools unavailable (developer): {e}[/yellow]")
         return [], []
 
 
@@ -406,9 +407,11 @@ def _write_files(files: list[dict]) -> tuple[list[str], str | None]:
         path = f.get("path", "")
         content = f.get("content", "")
         if not path.startswith(_ALLOWED_PREFIX):
-            continue  # prefix 위반 — 조용히 skip
+            _console.print(f"  [red]⚠ prefix violation — dropped:[/red] {path!r}")
+            continue
         if not content:
-            continue  # 빈 content — 조용히 skip
+            _console.print(f"  [yellow]⚠ empty content — dropped:[/yellow] {path!r}")
+            continue
         valid_files.append((path, content))
 
     # Phase 2: Write (검증 통과 파일만)

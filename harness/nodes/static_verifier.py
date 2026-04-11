@@ -11,10 +11,9 @@ Static Verifier 노드. LLM 없음, 순수 결정적.
 from pathlib import Path
 from typing import Optional
 
+from harness.config import NAMESPACE
 from harness.state import HarnessState
 from harness.verifiers import static
-
-NAMESPACE = "gikview"
 
 # 프로젝트 루트: harness/nodes/ → harness/ → GikView/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent

@@ -105,7 +105,7 @@ def check_dockerfile(docker_dir: str, log_dir: Optional[str] = None) -> dict:
     """
     Dockerfile 정적 검사.
     - hadolint 설치 시: lint 실행
-    - 미설치 시: Dockerfile 존재 여부만 확인(skip)
+    - 미설치 시(FileNotFoundError → exit_code=-1): skip
     """
     dockerfile = Path(docker_dir) / "Dockerfile"
     if not dockerfile.exists():
@@ -113,8 +113,6 @@ def check_dockerfile(docker_dir: str, log_dir: Optional[str] = None) -> dict:
         return _result("dockerfile", "fail", detail, log_dir, detail)
 
     r = shell.run(["hadolint", str(dockerfile)])
-    if r["exit_code"] == 127 or "not found" in r["stderr"].lower():
-        return _result("dockerfile", "skip", "hadolint not installed", log_dir)
     return _from_run("dockerfile", r, log_dir)
 
 

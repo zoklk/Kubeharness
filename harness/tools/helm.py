@@ -25,17 +25,23 @@ def upgrade_install(
     chart_path: str,
     namespace: str,
     values_files: list[str] | None = None,
-    timeout: str = "120s",
 ) -> dict:
+    """
+    매니페스트를 API 서버에 적용만 함. --wait 없음.
+    파드 Ready 대기는 runtime_gates의 kubectl wait 단계에서 수행.
+    """
     cmd = [
         "helm", "upgrade", "--install", release_name, chart_path,
         "-n", namespace,
-        "--timeout", timeout,
-        "--wait",
     ]
     for vf in (values_files or []):
         cmd += ["-f", vf]
-    return run(cmd, timeout=int(timeout.rstrip("s")) + 30)
+    return run(cmd)
+
+
+def uninstall(release_name: str, namespace: str) -> dict:
+    cmd = ["helm", "uninstall", release_name, "-n", namespace]
+    return run(cmd)
 
 
 def dry_run_server(

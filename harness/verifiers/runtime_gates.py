@@ -3,10 +3,13 @@
 
 run_runtime_phase1(service_name) -> {"passed": bool, "checks": [...]}
 
+배포 경로 자동 감지:
+  has_helm      : edge-server/helm/<service>/  → helm upgrade --install → kubectl wait pods
+  has_manifests : edge-server/manifests/<service>/ → kubectl apply (pod wait 없음)
+  둘 다 없음    : 즉시 fail
+
 컨벤션 (context/conventions.md와 동기화):
   namespace      : gikview
-  chart_path     : edge-server/helm/<service>/
-  values_files   : values.yaml (필수) + values-dev.yaml (존재 시)
   release_name   : <service>-dev-v1
   label_selector : app.kubernetes.io/name=<service>
   smoke_test     : edge-server/scripts/smoke-test-<service>.sh (없으면 skip)
@@ -18,9 +21,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from harness.config import NAMESPACE
 from harness.tools import helm, kubectl, shell
-
-NAMESPACE = "gikview"
 
 # 프로젝트 루트: harness/verifiers/ → harness/ → GikView/
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -136,27 +138,48 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
     """
     순서대로 실행. 하나 fail이면 이후 체크는 skip하고 즉시 반환.
 
+    배포 유형 자동 감지:
+      - edge-server/helm/<service>/ 존재 → helm upgrade --install + kubectl wait pods
+      - edge-server/manifests/<service>/ 존재 (helm 없음) → kubectl apply (pod wait 생략)
+      - 둘 다 없음 → 즉시 fail
+
     Returns:
         {"passed": bool, "checks": [{"name", "status", "detail", "log_path"}, ...]}
     """
+    from harness.config import cluster_config
+
     chart_path = str(PROJECT_ROOT / f"edge-server/helm/{service_name}")
+    manifest_dir = str(PROJECT_ROOT / f"edge-server/manifests/{service_name}")
     release_name = f"{service_name}-dev-v1"
     label_selector = f"app.kubernetes.io/name={service_name}"
     smoke_test_path = PROJECT_ROOT / f"edge-server/scripts/smoke-test-{service_name}.sh"
 
-    # values.yaml 필수, values-dev.yaml 있으면 포함
-    values_files = [
-        str(PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}")
-        for vf in ["values.yaml", "values-dev.yaml"]
-        if (PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}").exists()
-    ]
+    has_helm = Path(chart_path).is_dir()
+    has_manifests = Path(manifest_dir).is_dir()
 
     checks = []
 
-    # ① docker build + push (Dockerfile 존재 시)
+    # ① 배포 아티팩트 없음 → 즉시 실패
+    if not has_helm and not has_manifests:
+        checks.append(_result(
+            "deploy", "fail",
+            f"no helm chart at 'edge-server/helm/{service_name}' or "
+            f"manifests at 'edge-server/manifests/{service_name}'",
+            log_dir,
+        ))
+        return {"passed": False, "checks": checks}
+
+    # ② docker build + push (Dockerfile 존재 시)
     build_cfg = _load_build_config()
     registry = build_cfg.get("registry", "")
     image_tag = build_cfg.get("image_tag", "dev")
+
+    deploy_step = "helm_install" if has_helm else "kubectl_apply"
+    post_deploy_skips = (
+        [_skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
+        if has_helm
+        else [_skip("kubectl_events"), _skip("smoke_test")]
+    )
 
     if not registry and (PROJECT_ROOT / f"edge-server/docker/{service_name}" / "Dockerfile").exists():
         checks.append(_result(
@@ -164,41 +187,67 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
             "config/build.yaml missing or 'registry' not set",
             log_dir,
         ))
-        checks += [_skip("docker_push"), _skip("helm_install"),
-                   _skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
+        checks += [_skip("docker_push"), _skip(deploy_step)] + post_deploy_skips
         return {"passed": False, "checks": checks}
 
     docker_checks = _run_docker_build(service_name, registry, image_tag, log_dir)
     checks.extend(docker_checks)
     if docker_checks and docker_checks[-1]["status"] == "fail":
-        checks += [_skip("helm_install"), _skip("kubectl_wait"),
-                   _skip("kubectl_events"), _skip("smoke_test")]
+        checks += [_skip(deploy_step)] + post_deploy_skips
         return {"passed": False, "checks": checks}
 
-    # ② helm upgrade --install
-    r = helm.upgrade_install(release_name, chart_path, NAMESPACE, values_files)
-    checks.append(_from_run("helm_install", r, log_dir))
-    if checks[-1]["status"] == "fail":
-        checks += [_skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
-        return {"passed": False, "checks": checks}
+    # ③ 배포
+    if has_helm:
+        active = cluster_config().get("_active", "dev")
+        values_files = [
+            str(PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}")
+            for vf in ["values.yaml", f"values-{active}.yaml"]
+            if (PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}").exists()
+        ]
 
-    # ② kubectl wait --for=condition=Ready
-    r = kubectl.wait("pods", "Ready", NAMESPACE, label=label_selector, timeout="120s")
-    status = "pass" if r["exit_code"] == 0 else "fail"
-    detail = (r["stdout"] + r["stderr"]).strip() or "OK"
-    checks.append(_result("kubectl_wait", status, detail, log_dir, r["stdout"] + r["stderr"]))
-    if status == "fail":
-        checks += [_skip("kubectl_events"), _skip("smoke_test")]
-        return {"passed": False, "checks": checks}
+        # immutable field 감지 시 uninstall 후 재설치
+        r = helm.upgrade_install(release_name, chart_path, NAMESPACE, values_files)
+        if r["exit_code"] != 0 and "immutable" in (r["stderr"] + r["stdout"]).lower():
+            uninstall_r = helm.uninstall(release_name, NAMESPACE)
+            uninstall_check = _from_run("helm_uninstall_immutable", uninstall_r, log_dir)
+            checks.append(uninstall_check)
+            if uninstall_check["status"] == "fail":
+                checks += [_skip("helm_install"), _skip("kubectl_wait"),
+                           _skip("kubectl_events"), _skip("smoke_test")]
+                return {"passed": False, "checks": checks}
+            r = helm.upgrade_install(release_name, chart_path, NAMESPACE, values_files)
 
-    # ③ kubectl get events (Warning, 최근 5분)
+        checks.append(_from_run("helm_install", r, log_dir))
+        if checks[-1]["status"] == "fail":
+            checks += [_skip("kubectl_wait"), _skip("kubectl_events"), _skip("smoke_test")]
+            return {"passed": False, "checks": checks}
+
+        # ④ kubectl wait pods (helm only — manifest/CRD는 pod 없음)
+        # 300s: StatefulSet 이미지 풀 + 순차 기동 감안
+        r = kubectl.wait("pods", "Ready", NAMESPACE, label=label_selector, timeout="300s")
+        status = "pass" if r["exit_code"] == 0 else "fail"
+        detail = (r["stdout"] + r["stderr"]).strip() or "OK"
+        checks.append(_result("kubectl_wait", status, detail, log_dir, r["stdout"] + r["stderr"]))
+        if status == "fail":
+            checks += [_skip("kubectl_events"), _skip("smoke_test")]
+            return {"passed": False, "checks": checks}
+
+    else:
+        # manifest-only (CRD, 클러스터 레벨 설정 등) — pod wait 생략
+        r = kubectl.apply(manifest_dir, NAMESPACE)
+        checks.append(_from_run("kubectl_apply", r, log_dir))
+        if checks[-1]["status"] == "fail":
+            checks += [_skip("kubectl_events"), _skip("smoke_test")]
+            return {"passed": False, "checks": checks}
+
+    # ⑤ kubectl get events (Warning, 최근 5분)
     r = kubectl.get_events(NAMESPACE, field_selector="type=Warning,involvedObject.kind=Pod")
     checks.append(_parse_warning_events(r, log_dir))
     if checks[-1]["status"] == "fail":
         checks.append(_skip("smoke_test"))
         return {"passed": False, "checks": checks}
 
-    # ④ smoke test
+    # ⑥ smoke test
     if smoke_test_path.exists():
         r = shell.run(["bash", str(smoke_test_path)])
         checks.append(_from_run("smoke_test", r, log_dir))

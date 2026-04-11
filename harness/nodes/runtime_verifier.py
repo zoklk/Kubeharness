@@ -53,11 +53,13 @@ def _load_system_prompt() -> str:
 
 
 async def _load_tools() -> tuple[list, list[dict]]:
-    """kagent tools 로드. 실패 시 빈 리스트로 graceful degradation."""
+    """kagent tools 로드. 실패 시 경고 후 빈 리스트로 graceful degradation."""
     try:
         tool_objs = await get_kagent_tools("runtime_verifier_tools")
         return tool_objs, tools_as_chat_dicts(tool_objs)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("kagent tools unavailable (runtime_verifier): %s", e)
         return [], []
 
 

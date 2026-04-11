@@ -8,6 +8,9 @@ import yaml
 
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "config" / "cluster.yaml"
 
+# 컨벤션 상수 — 하네스 전체에서 공유
+NAMESPACE = "gikview"
+
 _DEFAULTS = {
     "domain_suffix": "cluster.local",
     "arch": "amd64",

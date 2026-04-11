@@ -5,13 +5,15 @@ harness/verifiers/runtime_gates.py 단위 테스트
 
 import json
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from harness.verifiers.runtime_gates import run_runtime_phase1, _parse_warning_events, PROJECT_ROOT
+from harness.verifiers.runtime_gates import run_runtime_phase1, _parse_warning_events
 
 SERVICE = "myapp"
+
 
 # ── 공통 mock 반환값 헬퍼 ─────────────────────────────────────────────────────
 
@@ -37,10 +39,23 @@ def _warning_event(msg="crash", reason="OOMKilled", obj="myapp-xxx",
     }
 
 
+# ── autouse: 기본 helm 디렉토리 생성 ─────────────────────────────────────────
+#
+# 대부분의 테스트가 helm path를 전제하므로 PROJECT_ROOT를 tmp_path로 교체하고
+# edge-server/helm/<SERVICE>/ 디렉토리를 자동 생성한다.
+# manifest-path 테스트는 별도로 manifest_dir을 생성하고 helm_dir을 제거한다.
+
+@pytest.fixture(autouse=True)
+def _default_helm_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
+    (tmp_path / "edge-server" / "helm" / SERVICE).mkdir(parents=True, exist_ok=True)
+    return tmp_path
+
+
 # ── 전체 성공 경로 ─────────────────────────────────────────────────────────────
 
-def test_all_pass_no_smoke():
-    """smoke test 없을 때 4개 체크 중 3개 pass + smoke skip."""
+def test_all_pass_no_smoke(tmp_path):
+    """smoke test 없을 때 helm_install, kubectl_wait, kubectl_events pass + smoke skip."""
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()) as m_wait,
@@ -55,17 +70,16 @@ def test_all_pass_no_smoke():
     assert statuses["kubectl_events"] == "pass"
     assert statuses["smoke_test"] == "skip"
 
-    # 명령 인자 검증
     m_helm.assert_called_once_with(
         f"{SERVICE}-dev-v1",
-        str(PROJECT_ROOT / f"edge-server/helm/{SERVICE}"),
+        str(tmp_path / f"edge-server/helm/{SERVICE}"),
         "gikview",
-        [],  # 실제 프로젝트에 edge-server/helm/myapp/values.yaml 없음
+        [],  # values.yaml 없으면 빈 리스트
     )
     m_wait.assert_called_once_with(
         "pods", "Ready", "gikview",
         label=f"app.kubernetes.io/name={SERVICE}",
-        timeout="120s",
+        timeout="300s",
     )
     m_ev.assert_called_once_with(
         "gikview",
@@ -75,7 +89,6 @@ def test_all_pass_no_smoke():
 
 def test_all_pass_with_smoke(tmp_path, monkeypatch):
     """smoke test 스크립트가 존재하고 통과하면 passed=True."""
-    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     smoke_dir = tmp_path / "edge-server" / "scripts"
     smoke_dir.mkdir(parents=True)
     (smoke_dir / f"smoke-test-{SERVICE}.sh").write_text("exit 0")
@@ -96,11 +109,26 @@ def test_all_pass_with_smoke(tmp_path, monkeypatch):
     assert f"smoke-test-{SERVICE}.sh" in args[1]
 
 
+# ── 배포 아티팩트 없음 ────────────────────────────────────────────────────────
+
+def test_no_artifacts_fail(tmp_path, monkeypatch):
+    """helm chart도 manifest dir도 없으면 즉시 fail."""
+    # autouse가 만든 helm dir 제거
+    import shutil
+    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
+
+    result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    assert result["checks"][0]["name"] == "deploy"
+    assert result["checks"][0]["status"] == "fail"
+
+
 # ── helm_install fail ─────────────────────────────────────────────────────────
 
 def test_helm_fail_skips_rest():
-    """helm install 실패 시 나머지 3개 skip, passed=False."""
-    with patch("harness.tools.helm.upgrade_install", return_value=_fail("immutable field")):
+    """helm install 일반 실패(immutable 아님) 시 나머지 3개 skip, passed=False."""
+    with patch("harness.tools.helm.upgrade_install", return_value=_fail("connection timed out")):
         result = run_runtime_phase1(SERVICE)
 
     assert result["passed"] is False
@@ -110,7 +138,66 @@ def test_helm_fail_skips_rest():
     assert statuses["kubectl_events"] == "skip"
     assert statuses["smoke_test"] == "skip"
     helm_check = next(c for c in result["checks"] if c["name"] == "helm_install")
-    assert "immutable field" in helm_check["detail"]
+    assert "connection timed out" in helm_check["detail"]
+
+
+def test_helm_immutable_uninstall_then_reinstall_success():
+    """immutable 에러 → uninstall 성공 → 재설치 성공 → passed=True."""
+    install_responses = [
+        _fail("StatefulSet.apps field is immutable"),
+        _ok("deployed"),
+    ]
+    with (
+        patch("harness.tools.helm.upgrade_install", side_effect=install_responses) as m_helm,
+        patch("harness.tools.helm.uninstall", return_value=_ok()) as m_uninstall,
+        patch("harness.tools.kubectl.wait", return_value=_ok()),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["helm_uninstall_immutable"] == "pass"
+    assert statuses["helm_install"] == "pass"
+    assert m_helm.call_count == 2
+    m_uninstall.assert_called_once()
+
+
+def test_helm_immutable_uninstall_fails():
+    """immutable 에러 → uninstall 실패 → passed=False, 이후 skip."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_fail("immutable")),
+        patch("harness.tools.helm.uninstall", return_value=_fail("release not found")) as m_uninstall,
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["helm_uninstall_immutable"] == "fail"
+    assert statuses["helm_install"] == "skip"
+    assert statuses["kubectl_wait"] == "skip"
+    m_uninstall.assert_called_once()
+
+
+def test_helm_immutable_reinstall_fails():
+    """immutable 에러 → uninstall 성공 → 재설치 실패 → passed=False."""
+    install_responses = [
+        _fail("immutable field detected"),
+        _fail("CrashLoopBackOff"),
+    ]
+    with (
+        patch("harness.tools.helm.upgrade_install", side_effect=install_responses),
+        patch("harness.tools.helm.uninstall", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", return_value=_ok()),
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["helm_uninstall_immutable"] == "pass"
+    assert statuses["helm_install"] == "fail"
+    assert statuses["kubectl_wait"] == "skip"
 
 
 # ── kubectl_wait fail ─────────────────────────────────────────────────────────
@@ -168,7 +255,6 @@ def test_events_warning_old_pass():
 # ── smoke_test fail ───────────────────────────────────────────────────────────
 
 def test_smoke_fail(tmp_path, monkeypatch):
-    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     smoke_dir = tmp_path / "edge-server" / "scripts"
     smoke_dir.mkdir(parents=True)
     (smoke_dir / f"smoke-test-{SERVICE}.sh").write_text("exit 1")
@@ -190,9 +276,8 @@ def test_smoke_fail(tmp_path, monkeypatch):
 
 def test_values_files_included_when_present(tmp_path, monkeypatch):
     """values.yaml, values-dev.yaml 모두 존재 시 둘 다 전달."""
-    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     chart_dir = tmp_path / "edge-server" / "helm" / SERVICE
-    chart_dir.mkdir(parents=True)
+    chart_dir.mkdir(parents=True, exist_ok=True)
     (chart_dir / "values.yaml").write_text("replicas: 1")
     (chart_dir / "values-dev.yaml").write_text("replicas: 1")
 
@@ -210,9 +295,8 @@ def test_values_files_included_when_present(tmp_path, monkeypatch):
 
 def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
     """values-dev.yaml 없으면 values.yaml만 전달."""
-    monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     chart_dir = tmp_path / "edge-server" / "helm" / SERVICE
-    chart_dir.mkdir(parents=True)
+    chart_dir.mkdir(parents=True, exist_ok=True)
     (chart_dir / "values.yaml").write_text("replicas: 1")
 
     with (
@@ -226,6 +310,48 @@ def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
     assert len(vf) == 1
     assert "values.yaml" in vf[0]
     assert not any("values-dev" in f for f in vf)
+
+
+# ── manifest-only 경로 ────────────────────────────────────────────────────────
+
+def test_manifest_deploy_pass(tmp_path, monkeypatch):
+    """manifest dir 존재, kubectl apply 성공 → passed=True, pod wait 없음."""
+    import shutil
+    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
+    (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
+
+    with (
+        patch("harness.tools.kubectl.apply", return_value=_ok()) as m_apply,
+        patch("harness.tools.kubectl.get_events", return_value=_events_json([])),
+    ):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_apply"] == "pass"
+    assert "kubectl_wait" not in statuses   # pod wait 없음
+    assert statuses["kubectl_events"] == "pass"
+    assert statuses["smoke_test"] == "skip"
+    m_apply.assert_called_once_with(
+        str(tmp_path / "edge-server" / "manifests" / SERVICE),
+        "gikview",
+    )
+
+
+def test_manifest_deploy_fail(tmp_path, monkeypatch):
+    """kubectl apply 실패 → kubectl_apply=fail, 이후 skip."""
+    import shutil
+    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
+    (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
+
+    with patch("harness.tools.kubectl.apply", return_value=_fail("CRD not found")):
+        result = run_runtime_phase1(SERVICE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_apply"] == "fail"
+    assert statuses["kubectl_events"] == "skip"
+    assert statuses["smoke_test"] == "skip"
 
 
 # ── log_dir 저장 확인 ─────────────────────────────────────────────────────────
@@ -242,7 +368,6 @@ def test_log_dir_saved(tmp_path):
 
     helm_check = next(c for c in result["checks"] if c["name"] == "helm_install")
     assert helm_check["log_path"] is not None
-    from pathlib import Path
     assert Path(helm_check["log_path"]).exists()
 
 

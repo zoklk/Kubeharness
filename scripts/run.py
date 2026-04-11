@@ -229,7 +229,8 @@ def _handle_runtime_interrupt(state: HarnessState, skip: bool) -> bool:
         return True
 
     choice = _prompt("재시도하려면 'continue', 중단하려면 'abort': ").strip().lower()
-    return choice == "continue"
+    # 비대화형(non-TTY)이면 _prompt가 "" 반환 → developer interrupt와 동일하게 continue 처리
+    return choice != "abort"
 
 
 def _prompt(msg: str) -> str:
