@@ -53,6 +53,20 @@ def _read_context(name: str) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else f"[{name} not found]"
 
 
+def _extract_service_name(sub_goal_spec: str, fallback: str) -> str:
+    """
+    sub_goal 섹션에서 service_name 필드 추출.
+    형식: - **service_name**: <값>  (백틱 있거나 없거나)
+    못 찾으면 fallback(sub_goal["name"]) 반환.
+    """
+    m = re.search(
+        r'\*\*service_name\*\*\s*:\s*`?([a-z0-9][a-z0-9-]+)`?',
+        sub_goal_spec,
+        re.IGNORECASE,
+    )
+    return m.group(1).strip() if m else fallback
+
+
 def _extract_subgoal_section(phase_md: str, sub_goal_name: str) -> str:
     """
     phase.md에서 sub_goal_name을 포함하는 heading 섹션 추출.
@@ -206,6 +220,28 @@ async def _run_tool_loop(
     return messages
 
 
+# ── 기존 파일 스캔 ────────────────────────────────────────────────────────────
+
+def _collect_existing_files(service_name: str) -> list[str]:
+    """
+    LLM이 파일을 쓰지 않았을 때 폴백.
+    edge-server/{helm,manifests,docker}/<service_name>/ 디렉토리를 스캔해
+    PROJECT_ROOT 상대 경로 목록 반환.
+    """
+    candidates = [
+        PROJECT_ROOT / f"edge-server/helm/{service_name}",
+        PROJECT_ROOT / f"edge-server/manifests/{service_name}",
+        PROJECT_ROOT / f"edge-server/docker/{service_name}",
+    ]
+    files: list[str] = []
+    for base in candidates:
+        if base.is_dir():
+            for p in sorted(base.rglob("*")):
+                if p.is_file():
+                    files.append(str(p.relative_to(PROJECT_ROOT)))
+    return files
+
+
 # ── 파싱 및 파일 쓰기 ─────────────────────────────────────────────────────────
 
 def _parse_artifacts(content: str) -> dict | None:
@@ -296,6 +332,7 @@ async def developer_node(state: HarnessState) -> dict:
     # sub_goal_spec 추출 및 캐시 (runtime_verifier Phase 2에서 재사용)
     phase_md = _read_context(f"phases/{sub_goal['phase']}.md")
     sub_goal_spec = _extract_subgoal_section(phase_md, sub_goal["name"])
+    service_name = _extract_service_name(sub_goal_spec, fallback=sub_goal["name"])
 
     messages = [
         {"role": "system", "content": _load_system_prompt()},
@@ -315,9 +352,13 @@ async def developer_node(state: HarnessState) -> dict:
         written_files, write_error = _write_files(artifacts.get("files", []))
         notes = f"[WriteError] {write_error}" if write_error else artifacts.get("notes", "")
 
+    # 쓰기 완료 후 서비스 디렉토리 전체 스캔 (기존 + 새로 쓴 파일 모두 포함)
+    # 디렉토리가 아직 없는 완전 신규 서비스면 written_files 폴백
+    artifact_files = _collect_existing_files(service_name) or written_files
+
     return {
-        "current_sub_goal": {**sub_goal, "stage": "dev"},
-        "dev_artifacts": {"files": written_files, "notes": notes},
+        "current_sub_goal": {**sub_goal, "stage": "dev", "service_name": service_name},
+        "dev_artifacts": {"files": artifact_files, "notes": notes},
         "error_count": error_count,
         "sub_goal_spec": sub_goal_spec,
         "user_hint": "",  # 이번 시도에서 소비한 hint 소거 — 다음 재시도에 누적 방지

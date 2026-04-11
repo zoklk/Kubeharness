@@ -77,7 +77,7 @@ def _log_dir(state: HarnessState) -> str:
 
 def static_verifier_node(state: HarnessState) -> dict:
     sub_goal = state["current_sub_goal"]
-    service_name = sub_goal["name"]
+    service_name = sub_goal.get("service_name") or sub_goal["name"]
     artifacts = state.get("dev_artifacts") or {}
     files: list[str] = artifacts.get("files", [])
 

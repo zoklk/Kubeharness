@@ -20,6 +20,7 @@ error_count가 --max-retries에 도달하면 developer 직전 interrupt에서
 
 import argparse
 import sys
+import asyncio
 from typing import Any
 
 from rich.console import Console
@@ -29,6 +30,9 @@ from rich import box
 
 from harness.graph import build_graph
 from harness.state import HarnessState
+
+from dotenv import load_dotenv  # .env 읽기
+load_dotenv()
 
 console = Console()
 
@@ -237,7 +241,7 @@ def _prompt(msg: str) -> str:
 
 # ── 메인 루프 ─────────────────────────────────────────────────────────────────
 
-def main() -> None:
+async def main() -> None:
     args = _parse_args()
 
     initial_state: HarnessState = {
@@ -264,7 +268,7 @@ def main() -> None:
     while True:
         # ── user_hint state 주입 (developer 재개 직전) ────────────────────────
         if user_hint:
-            graph.update_state(config, {"user_hint": user_hint}, as_node="developer")
+            graph.update_state(config, {"user_hint": user_hint})
             user_hint = ""
 
         # ── 스트림 실행 ───────────────────────────────────────────────────────
@@ -274,14 +278,14 @@ def main() -> None:
         first_run = False
 
         try:
-            for event in graph.stream(stream_input, config, stream_mode="values"):
+            async for event in graph.astream(stream_input, config, stream_mode="values"):
                 _on_event(event)
         except Exception as e:
             console.print(f"[red]Runtime error: {e}[/red]")
             raise
 
         # ── interrupt 지점 판정 ───────────────────────────────────────────────
-        snapshot = graph.get_state(config)
+        snapshot = await graph.aget_state(config)
 
         # metadata.writes: 직전에 실행된 노드 → interrupt 종류 구분에 사용
         # interrupt_before["developer"]      → writes에 runtime_verifier 없음
@@ -347,4 +351,8 @@ def _on_event(event: dict) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]사용자에 의해 중단되었습니다.[/yellow]")
+        sys.exit(0)

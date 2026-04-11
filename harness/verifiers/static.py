@@ -27,6 +27,8 @@ def _result(name: str, status: str, detail: str, log_dir: Optional[str], raw: st
 
 
 def _from_run(name: str, r: dict, log_dir: Optional[str]) -> dict:
+    if r["exit_code"] == -1 and "[Errno 2]" in r.get("stderr", ""):
+        return _result(name, "skip", f"{name} not installed", log_dir)
     status = "pass" if r["exit_code"] == 0 else "fail"
     detail = (r["stdout"] + r["stderr"]).strip() or "OK"
     return _result(name, status, detail, log_dir, r["stdout"] + r["stderr"])

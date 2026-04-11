@@ -236,3 +236,47 @@ def test_state_fields_set(tmp_path, monkeypatch):
     # sub_goal stage 업데이트
     assert result["current_sub_goal"]["stage"] == "static_verify"
     assert result["current_sub_goal"]["name"] == SERVICE
+
+
+# ── service_name 오버라이드 ────────────────────────────────────────────────────
+
+def test_service_name_overrides_name_for_path(tmp_path, monkeypatch):
+    """sub_goal.service_name이 있으면 name 대신 사용해 경로/release_name을 결정."""
+    monkeypatch.chdir(tmp_path)
+    # sub_goal name은 "mqtt-mtls-listener" 이지만 service_name은 "emqx"
+    alt_service = "emqx"
+    files = [
+        f"edge-server/helm/{alt_service}/Chart.yaml",
+        f"edge-server/helm/{alt_service}/values.yaml",
+    ]
+    state = {
+        "current_phase": "messaging",
+        "current_sub_goal": {
+            "name": "mqtt-mtls-listener",
+            "phase": "messaging",
+            "stage": "dev",
+            "service_name": alt_service,   # ← 오버라이드
+        },
+        "dev_artifacts": {"files": files, "notes": ""},
+        "history": [],
+        "error_count": 0,
+    }
+
+    with (
+        patch("harness.verifiers.static.check_path_prefix", return_value=_pass("pp")) as m_pp,
+        patch("harness.verifiers.static.check_yamllint", return_value=_pass("yl")) as m_yl,
+        patch("harness.verifiers.static.check_helm_lint", return_value=_pass("hl")) as m_hl,
+        patch("harness.verifiers.static.check_helm_template_kubeconform", return_value=_pass("htk")) as m_htk,
+        patch("harness.verifiers.static.check_trivy_config", return_value=_pass("tc")),
+        patch("harness.verifiers.static.check_gitleaks", return_value=_pass("gl")),
+        patch("harness.verifiers.static.check_helm_dry_run_server", return_value=_pass("hd")) as m_hd,
+    ):
+        result = static_verifier_node(state)
+
+    expected_chart = str(PROJECT_ROOT / f"edge-server/helm/{alt_service}")
+    expected_release = f"{alt_service}-dev-v1"
+
+    # service_name 기반 경로 사용 확인
+    assert m_yl.call_args[0][0] == expected_chart
+    assert m_htk.call_args[0][1] == expected_release
+    assert result["verification"]["passed"] is True

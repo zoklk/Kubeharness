@@ -13,6 +13,7 @@ from harness.nodes.developer import (
     developer_node,
     _parse_artifacts,
     _extract_subgoal_section,
+    _extract_service_name,
     _write_files,
     _verification_summary,
     _build_user_message,
@@ -178,11 +179,12 @@ async def test_all_paths_outside_prefix_writes_nothing(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_parse_failure_returns_empty_files():
-    """LLM이 JSON 아닌 응답 시 files=[], notes에 parse failed 기록."""
+    """LLM이 JSON 아닌 응답 시 notes에 parse failed 기록. 기존 파일 폴백은 별도 테스트."""
     with (
         patch("harness.nodes.developer._load_tools", return_value=([], [])),
         patch("harness.llm.client.chat",
               return_value=_llm_resp("Sorry, I cannot help with that.")),
+        patch("harness.nodes.developer._collect_existing_files", return_value=[]),
     ):
         result = await developer_node(_state())
 
@@ -378,6 +380,7 @@ async def test_state_fields():
     assert "notes" in result["dev_artifacts"]
     assert result["current_sub_goal"]["stage"] == "dev"
     assert result["current_sub_goal"]["name"] == SERVICE
+    assert "service_name" in result["current_sub_goal"]
     assert "error_count" in result
 
 
@@ -663,6 +666,37 @@ def test_verification_summary_runtime_phase2_suggestions():
     s = _verification_summary(v)
     assert "[OBS] logs: OOM detected" in s
     assert "[SUGGESTION] Increase memory limit" in s
+
+
+# ── _extract_service_name 직접 테스트 ────────────────────────────────────────
+
+def test_extract_service_name_backtick_format():
+    """- **service_name**: `emqx` 형식 추출."""
+    spec = "## Sub_goal: `emqx`\n- **service_name**: `emqx`\n\n### 1. 목표"
+    assert _extract_service_name(spec, fallback="fallback") == "emqx"
+
+
+def test_extract_service_name_no_backtick():
+    """- **service_name**: cilium-l2 (백틱 없음) 형식 추출."""
+    spec = "## Sub_goal: `cilium-l2-vip`\n- **service_name**: cilium-l2\n\n### 1."
+    assert _extract_service_name(spec, fallback="fallback") == "cilium-l2"
+
+
+def test_extract_service_name_differs_from_sub_goal():
+    """service_name이 sub_goal name과 다를 때 올바르게 추출."""
+    spec = "## Sub_goal: `mqtt-mtls-listener`\n- **service_name**: `emqx`\n"
+    assert _extract_service_name(spec, fallback="mqtt-mtls-listener") == "emqx"
+
+
+def test_extract_service_name_fallback_when_missing():
+    """service_name 필드 없으면 fallback 반환."""
+    spec = "## Sub_goal: `prometheus`\n\n### 1. 목표\n- 기능: 설치"
+    assert _extract_service_name(spec, fallback="prometheus") == "prometheus"
+
+
+def test_extract_service_name_fallback_on_empty_spec():
+    """spec이 빈 문자열이면 fallback 반환."""
+    assert _extract_service_name("", fallback="myapp") == "myapp"
 
 
 # ── _build_user_message 컨텍스트 포함 여부 ────────────────────────────────────

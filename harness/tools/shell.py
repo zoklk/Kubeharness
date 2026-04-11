@@ -1,5 +1,17 @@
+import os
 import subprocess
+from pathlib import Path
 from typing import Optional
+
+
+def _env() -> dict:
+    """~/.local/bin을 PATH 앞에 추가한 환경변수 반환."""
+    env = os.environ.copy()
+    local_bin = str(Path.home() / ".local" / "bin")
+    current_path = env.get("PATH", "")
+    if local_bin not in current_path.split(":"):
+        env["PATH"] = f"{local_bin}:{current_path}"
+    return env
 
 
 def run(
@@ -23,6 +35,7 @@ def run(
             cwd=cwd,
             timeout=timeout,
             shell=shell,
+            env=_env(),
         )
         return {
             "stdout": result.stdout,
@@ -60,8 +73,9 @@ def pipe(cmd1: list[str], cmd2: list[str], cwd: Optional[str] = None, timeout: i
     error_msg = None
 
     try:
-        p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
-        p2 = subprocess.Popen(cmd2, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
+        env = _env()
+        p1 = subprocess.Popen(cmd1, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env)
+        p2 = subprocess.Popen(cmd2, stdin=p1.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, env=env)
         p1.stdout.close()  # parent closes write end; p1 gets SIGPIPE when p2 exits
         stdout, stderr = p2.communicate(timeout=timeout)
         try:

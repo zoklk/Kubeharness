@@ -184,7 +184,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     상위 이벤트 루프(FastAPI, async LangGraph 워커 등)에서 안전하게 await 가능.
     """
     sub_goal = state["current_sub_goal"]
-    service_name = sub_goal["name"]
+    service_name = sub_goal.get("service_name") or sub_goal["name"]
     runtime_log_dir = _log_dir(state, "runtime")
     log_dir_base = str(Path(runtime_log_dir).parent) + "/"
 
