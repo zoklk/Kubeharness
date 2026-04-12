@@ -32,3 +32,4 @@ include = ["harness*"]
 
 [tool.pytest.ini_options]
 env_files = [".env"]
+asyncio_mode = "strict"

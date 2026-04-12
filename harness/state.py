@@ -2,10 +2,13 @@ from typing import TypedDict, Optional, Literal
 
 Stage = Literal["dev", "static_verify", "runtime_verify"]
 
-class SubGoal(TypedDict):
-    name: str          # 예: "prometheus"
+class _SubGoalRequired(TypedDict):
+    name: str          # 예: "prometheus" — CLI --sub-goal 인수와 일치
     phase: str         # 예: "monitoring"
     stage: Stage       # 기록용
+
+class SubGoal(_SubGoalRequired, total=False):
+    service_name: str  # phase doc의 service_name 필드 (없으면 name으로 폴백)
 
 class HarnessState(TypedDict, total=False):
     # 위치
@@ -23,5 +26,10 @@ class HarnessState(TypedDict, total=False):
     verification: Optional[dict]
 
     # 이력
-    history: list[dict]
     error_count: int
+
+    # 사람 추가 지시 (developer interrupt에서 입력, developer_node가 user message에 포함 후 소거)
+    user_hint: Optional[str]
+
+    # 컨텍스트 캐시 (각 노드가 context/ 로드 후 저장, 하위 노드에서 재사용)
+    sub_goal_spec: Optional[str]  # context/phases/<phase>.md에서 추출한 현재 sub_goal 섹션
