@@ -498,3 +498,67 @@ def test_phase1_summary_fail_shows_detail():
     assert "[FAIL] helm_install" in summary
     assert "immutable field error on ConfigMap" in summary
     assert "[SKIP] kubectl_wait" in summary
+
+
+# ── Phase 2 knowledge 주입 ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_phase2_knowledge_injected_in_message():
+    """technology_name의 knowledge가 Phase 2 user message에 포함된다."""
+    captured: list[list[dict]] = []
+
+    def _capture_chat(messages, **kwargs):
+        captured.append(messages)
+        return _llm_resp(_phase2_json(False))
+
+    state = _state()
+    state["technology_name"] = "emqx"
+    state["sub_goal_spec"] = "- **dependency**: 없음"
+
+    knowledge = [
+        ("## Technology Knowledge: emqx", "DNS suffix: alpha.nexus.local for dev"),
+    ]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.nodes.runtime_verifier.read_knowledge", return_value=knowledge),
+        patch("harness.llm.client.chat", side_effect=_capture_chat),
+    ):
+        await runtime_verifier_node(state)
+
+    user_msg = captured[0][1]["content"]
+    assert "Technology Knowledge: emqx" in user_msg
+    assert "DNS suffix: alpha.nexus.local for dev" in user_msg
+
+
+@pytest.mark.asyncio
+async def test_phase2_no_knowledge_message_structure_unchanged():
+    """knowledge 없으면 기존 메시지 구조 그대로 — Phase 2 동작에 영향 없음."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.nodes.runtime_verifier.read_knowledge", return_value=[]),
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    assert result["verification"]["passed"] is False
+    assert "runtime_phase2" in result["verification"]
+
+
+@pytest.mark.asyncio
+async def test_phase2_knowledge_includes_deps():
+    """sub_goal_spec의 dependency가 read_knowledge에 전달된다."""
+    state = _state()
+    state["technology_name"] = "myapp"
+    state["sub_goal_spec"] = "- **dependency**: `step-ca`, `emqx`"
+
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.nodes.runtime_verifier.read_knowledge", return_value=[]) as m_rk,
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
+        await runtime_verifier_node(state)
+
+    m_rk.assert_called_once_with("myapp", ["step-ca", "emqx"])

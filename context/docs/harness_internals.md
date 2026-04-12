@@ -209,7 +209,15 @@ LLM 없음. 결정적 실행.
 
 - kagent 도구: 읽기 전용 (`GetPodLogs`, `DescribeResource`, `GetEvents` 등)
 - 역할: 실패 원인 진단. pod 로그, 이벤트, describe로 root cause를 파악해 Developer에게 구체적 수정 지시 제공
-- user message에 서비스 아티팩트 파일 목록(`## Artifact Files`) 포함 → 제안 시 정확한 경로 참조 가능
+- user message 주입 컨텍스트 (순서대로):
+
+  | 섹션 | 출처 | 목적 |
+  |------|------|------|
+  | Sub-Goal Specification | `state.sub_goal_spec` (developer가 캐시) | 목표 사양 |
+  | Phase 1 Results | `run_runtime_phase1()` 결과 | 실패한 체크 상세 |
+  | Artifact Files | `edge-server/{helm,manifests,docker}/<service>/` 스캔 | 정확한 파일 경로 참조 |
+  | Technology Knowledge | `context/knowledge/<tech>.md` (`harness.llm.context.read_knowledge`) | 기술 기반 지식, 환경별 설정값 (없으면 생략) |
+  | Previous Diagnostic Findings | `context/knowledge/<tech>-llm-findings.md` (`harness.llm.context.read_knowledge`) | 과거 진단 결과 힌트 (없으면 생략) |
 - 제안 형식: 파일 경로 + 정확한 YAML key + before→after 값 명시
 - 응답: `{"passed": false, "observations": [...], "suggestions": [...]}`
 - `passed`는 항상 `false` (Phase 1이 실패했으므로)

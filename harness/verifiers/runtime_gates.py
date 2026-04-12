@@ -22,9 +22,9 @@ import yaml
 from pathlib import Path
 from typing import Optional
 
-from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, cluster_config, label_selector, release_name
+from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, label_selector, release_name
 from harness.tools import helm, kubectl, shell
-from harness.verifiers import check_result
+from harness.verifiers import check_result, values_files
 
 _BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
 
@@ -194,12 +194,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
 
     # ③ 배포
     if has_helm:
-        active = cluster_config().get("_active", "dev")
-        values_files = [
-            str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}/{vf}")
-            for vf in ["values.yaml", f"values-{active}.yaml"]
-            if (PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}/{vf}").exists()
-        ]
+        vf = values_files(chart_path)
 
         # terminal 상태 pod만 선제 삭제: CrashLoopBackOff back-off 축적 pod가 rolling update를 막는 것을 방지
         # 정상 Running pod를 강제 삭제하면 EMQX 등 agent mode 전환 재시작 사이클이 반복됨
@@ -209,7 +204,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
 
         # immutable field 감지 시 uninstall 후 재설치
         # "immutable": generic k8s field, "forbidden: updates to statefulset spec": PVC/volumeClaimTemplates 변경
-        r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
+        r = helm.upgrade_install(rname, chart_path, NAMESPACE, vf)
         output_lower = (r["stderr"] + r["stdout"]).lower()
         if r["exit_code"] != 0 and (
             "immutable" in output_lower
@@ -221,7 +216,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
             if uninstall_check["status"] == "fail":
                 checks += [_skip("helm_install"), _skip("kubectl_wait"), _skip("smoke_test")]
                 return {"passed": False, "checks": checks}
-            r = helm.upgrade_install(rname, chart_path, NAMESPACE, values_files)
+            r = helm.upgrade_install(rname, chart_path, NAMESPACE, vf)
 
         checks.append(_from_run("helm_install", r, log_dir))
         if checks[-1]["status"] == "fail":

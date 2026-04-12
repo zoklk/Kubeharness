@@ -25,9 +25,11 @@ from rich.table import Table
 from harness.config import NAMESPACE, PROJECT_ROOT
 from harness.llm import client as llm
 from harness.llm.artifacts import scan_service_files
+from harness.llm.context import extract_dependencies, read_knowledge
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
+from harness.verifiers import node_log_dir
 from harness.verifiers.runtime_gates import run_runtime_phase1
 
 _console = Console()
@@ -72,13 +74,6 @@ _DEFAULT_SYSTEM_PROMPT = (
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
-
-def _log_dir(state: HarnessState, sub: str) -> str:
-    phase = state.get("current_phase", "unknown")
-    name = state["current_sub_goal"]["name"]
-    attempt = state.get("error_count", 0)
-    return str(PROJECT_ROOT / f"logs/raw/{phase}/{name}/attempt_{attempt}/{sub}")
-
 
 def _load_system_prompt() -> str:
     if _PROMPT_PATH.exists():
@@ -219,7 +214,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     """
     sub_goal = state["current_sub_goal"]
     service_name = sub_goal.get("service_name") or sub_goal["name"]
-    runtime_log_dir = _log_dir(state, "runtime")
+    runtime_log_dir = node_log_dir(state, "runtime")
     log_dir_base = str(Path(runtime_log_dir).parent) + "/"
 
     _console.print(f"\n[cyan]⟳[/cyan]  Runtime Verifier  [{service_name}]  Phase 1 ...")
@@ -247,6 +242,10 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     # ── Phase 2 (LLM 진단) — Phase 1 fail 시에만 실행 ───────────────────────
     _console.print(f"  [yellow]Phase 1 failed — starting LLM diagnosis ...[/yellow]")
     sub_goal_spec = state.get("sub_goal_spec", "")
+    technology_name = state.get("technology_name") or service_name
+    deps = extract_dependencies(sub_goal_spec)
+    knowledge_parts = read_knowledge(technology_name, deps)
+
     messages = [
         {"role": "system", "content": _load_system_prompt()},
         {
@@ -257,6 +256,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
                 + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
                 + _phase1_summary(phase1)
                 + _artifact_files_listing(service_name)
+                + ("".join(f"\n\n{title}\n{content}" for title, content in knowledge_parts) if knowledge_parts else "")
                 + "\n\nPhase 1 failed. Use the available tools to diagnose the root cause "
                   "(check pod logs, events, describe resources). "
                   "Identify why the deployment failed and provide actionable fix suggestions. "
@@ -294,8 +294,6 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
             _console.print("  [red]✗ JSON retry also failed — using parse-failure result[/red]")
 
     _print_phase2(phase2)
-
-    technology_name = state.get("technology_name") or service_name
     _save_llm_findings(technology_name, phase2, sub_goal["name"], sub_goal.get("phase", ""))
 
     return {

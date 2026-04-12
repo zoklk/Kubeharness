@@ -10,9 +10,9 @@ Static Verifier 노드. LLM 없음, 순수 결정적.
 
 from pathlib import Path
 
-from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, cluster_config, label_selector, release_name
+from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, release_name
 from harness.state import HarnessState
-from harness.verifiers import static
+from harness.verifiers import check_result, node_log_dir, static, values_files
 
 
 # ── artifacts 식별 ────────────────────────────────────────────────────────────
@@ -23,18 +23,6 @@ def _chart_path(service_name: str) -> str:
 
 def _manifest_dir(service_name: str) -> str:
     return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}manifests/{service_name}")
-
-
-def _values_files(chart_path: str) -> list[str]:
-    """존재하는 values 파일만 반환. active 환경의 오버라이드 파일을 사용."""
-    active = cluster_config().get("_active", "dev")
-    return [
-        vf for vf in [
-            f"{chart_path}/values.yaml",
-            f"{chart_path}/values-{active}.yaml",
-        ]
-        if Path(vf).exists()
-    ]
 
 
 def _docker_dir(service_name: str) -> str:
@@ -62,21 +50,13 @@ def _has_ebpf(files: list[str]) -> bool:
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
 
-def _log_dir(state: HarnessState) -> str:
-    """phase/sub_goal/attempt_N 구조로 로그 경로 생성. 절대 경로 반환."""
-    phase = state.get("current_phase", "unknown")
-    name = state["current_sub_goal"]["name"]
-    attempt = state.get("error_count", 0)
-    return str(PROJECT_ROOT / f"logs/raw/{phase}/{name}/attempt_{attempt}/static")
-
-
 def static_verifier_node(state: HarnessState) -> dict:
     sub_goal = state["current_sub_goal"]
     service_name = sub_goal.get("service_name") or sub_goal["name"]
     artifacts = state.get("dev_artifacts") or {}
     files: list[str] = artifacts.get("files", [])
 
-    log_dir = _log_dir(state)
+    log_dir = node_log_dir(state, "static")
 
     checks = []
 
@@ -87,7 +67,7 @@ def static_verifier_node(state: HarnessState) -> dict:
     if _has_helm(files, service_name):
         chart_path = _chart_path(service_name)
         rname = release_name(service_name)
-        vf = _values_files(chart_path)
+        vf = values_files(chart_path)
 
         checks.append(static.check_yamllint(chart_path, log_dir=log_dir))
         checks.append(static.check_helm_lint(chart_path, vf, log_dir=log_dir))
@@ -124,15 +104,12 @@ def static_verifier_node(state: HarnessState) -> dict:
         _has_docker(files, service_name),
         _has_ebpf(files),
     ]):
-        checks.append({
-            "name": "artifact_detection",
-            "status": "fail",
-            "detail": (
-                f"No helm chart, manifests, Dockerfile, or eBPF source "
-                f"found for service '{service_name}' in dev_artifacts"
-            ),
-            "log_path": None,
-        })
+        checks.append(check_result(
+            "artifact_detection", "fail",
+            f"No helm chart, manifests, Dockerfile, or eBPF source "
+            f"found for service '{service_name}' in dev_artifacts",
+            log_dir,
+        ))
 
     passed = all(c["status"] in ("pass", "skip") for c in checks)
 

@@ -323,18 +323,18 @@ def test_static_verification_passed_false_on_fail(tmp_path, monkeypatch):
     assert result["static_verification"]["passed"] == result["verification"]["passed"]
 
 
-# ── _values_files active env ─────────────────────────────────────────────────
+# ── values_files (shared) active env ─────────────────────────────────────────
 
 def test_values_files_uses_active_env_dev(tmp_path):
     """active=dev이면 values-dev.yaml을 선택한다."""
-    from harness.nodes.static_verifier import _values_files
+    from harness.verifiers import values_files
 
     (tmp_path / "values.yaml").write_text("x: 1\n")
     (tmp_path / "values-dev.yaml").write_text("x: 2\n")
     (tmp_path / "values-prod.yaml").write_text("x: 3\n")
 
-    with patch("harness.nodes.static_verifier.cluster_config", return_value={"_active": "dev"}):
-        result = _values_files(str(tmp_path))
+    with patch("harness.verifiers.cluster_config", return_value={"_active": "dev"}):
+        result = values_files(str(tmp_path))
 
     assert str(tmp_path / "values.yaml") in result
     assert str(tmp_path / "values-dev.yaml") in result
@@ -343,14 +343,14 @@ def test_values_files_uses_active_env_dev(tmp_path):
 
 def test_values_files_uses_active_env_prod(tmp_path):
     """active=prod이면 values-prod.yaml을 선택하고 values-dev.yaml은 제외."""
-    from harness.nodes.static_verifier import _values_files
+    from harness.verifiers import values_files
 
     (tmp_path / "values.yaml").write_text("x: 1\n")
     (tmp_path / "values-dev.yaml").write_text("x: 2\n")
     (tmp_path / "values-prod.yaml").write_text("x: 3\n")
 
-    with patch("harness.nodes.static_verifier.cluster_config", return_value={"_active": "prod"}):
-        result = _values_files(str(tmp_path))
+    with patch("harness.verifiers.cluster_config", return_value={"_active": "prod"}):
+        result = values_files(str(tmp_path))
 
     assert str(tmp_path / "values.yaml") in result
     assert str(tmp_path / "values-prod.yaml") in result
@@ -359,12 +359,12 @@ def test_values_files_uses_active_env_prod(tmp_path):
 
 def test_values_files_missing_env_file_excluded(tmp_path):
     """active 환경의 values 파일이 없으면 목록에서 제외된다."""
-    from harness.nodes.static_verifier import _values_files
+    from harness.verifiers import values_files
 
     (tmp_path / "values.yaml").write_text("x: 1\n")
     # values-dev.yaml 없음
 
-    with patch("harness.nodes.static_verifier.cluster_config", return_value={"_active": "dev"}):
-        result = _values_files(str(tmp_path))
+    with patch("harness.verifiers.cluster_config", return_value={"_active": "dev"}):
+        result = values_files(str(tmp_path))
 
     assert result == [str(tmp_path / "values.yaml")]
