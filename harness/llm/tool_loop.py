@@ -18,6 +18,7 @@ _console = Console()
 async def _execute_tools_parallel(
     tool_calls: list[dict],
     tool_map: dict,
+    tool_timeout: int = 60,
 ) -> list[tuple[dict, str]]:
     """LLM이 요청한 tool_calls를 asyncio.gather로 병렬 실행."""
     async def _exec_one(tc: dict) -> tuple[dict, str]:
@@ -25,7 +26,9 @@ async def _execute_tools_parallel(
         if tool is None:
             return tc, f"Unknown tool: {tc['name']}"
         try:
-            return tc, str(await tool.ainvoke(tc["input"]))
+            return tc, str(await asyncio.wait_for(tool.ainvoke(tc["input"]), timeout=tool_timeout))
+        except asyncio.TimeoutError:
+            return tc, f"Tool timed out after {tool_timeout}s"
         except Exception as e:
             return tc, f"Tool error: {e}"
 
@@ -37,6 +40,7 @@ async def run_tool_loop(
     tools: list[dict],
     tool_objs: list,
     max_turns: int,
+    tool_timeout: int = 60,
 ) -> list[dict]:
     """
     LLM이 tool_calls를 반환하는 동안 실행 루프.
@@ -68,7 +72,7 @@ async def run_tool_loop(
             assistant_msg["_gemini_raw_content"] = resp["_gemini_raw_content"]
         messages.append(assistant_msg)
 
-        results = await _execute_tools_parallel(resp["tool_calls"], tool_map)
+        results = await _execute_tools_parallel(resp["tool_calls"], tool_map, tool_timeout)
         for tc, result_str in results:
             messages.append({
                 "role": "tool",
