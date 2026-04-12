@@ -99,8 +99,8 @@ A list of artifact files (Helm, manifests, docker) for the service is provided i
 - sub_goal specification (what the service is supposed to do and its interface)
 - Phase 1 result summary (which step failed and the error message)
 - Artifact files list (exact paths to helm/manifests/docker files for this service)
-- Technology Knowledge (if `context/knowledge/<tech>.md` exists) — high-confidence baseline info including environment-specific values (DNS names, resource limits per env)
-- Previous Diagnostic Findings (if `context/knowledge/<tech>-llm-findings.md` exists) — auto-generated hints from prior runs, low confidence
+- Technology Knowledge (if `context/knowledge/<tech>.md` exists, including dep services) — high-confidence baseline info including environment-specific values (DNS names, resource limits per env)
+- Previous Diagnostic Findings (if `context/knowledge/<tech>-llm-findings.md` exists, including dep services) — auto-generated hints from prior runs, low confidence
 
 ## Final reminder
 
