@@ -37,19 +37,11 @@
     - Docker build:  edge-server/docker/<service_name>/   (커스텀 이미지 시)
     - eBPF 소스:     edge-server/ebpf/<service_name>/     (eBPF 모듈 시)
 
-─── C. 검증 명령어 — 실행 가능한 명령어로 작성 ───────────────────────────────
-  금지: "Pod가 Ready 상태여야 한다"  (사람이 읽는 설명)
-  필수: kubectl wait ... (실행 가능한 명령어 + 기대 결과)
-
-  · exit code 0, 출력에 포함되어야 할 문자열, HTTP 응답 코드 등을 명시합니다.
-  · 각 check는 # [check] <name> 주석으로 이름을 붙입니다.
-    Verifier 노드가 이 이름을 체크 결과 식별자로 사용합니다.
-
-─── D. 금지 항목 ─────────────────────────────────────────────────────────────
+─── C. 금지 항목 ─────────────────────────────────────────────────────────────
   · "권장", "예시로", "검토 필요" 등 모호한 표현 금지
   · 반드시 지켜야 하는 제약이 아닌 항목 기재 금지
   · 하나의 sub_goal 섹션에 두 개 이상의 service_name 금지
-  · 섹션 번호와 이름 변경 금지 (파서가 이름 기반으로 섹션을 찾습니다)
+  · 섹션 번호와 이름 변경 금지
   · 기술 내부 동작 설명, 설정 YAML 예시, 이미지/버전 결정 근거, 기술 일반 제약은
     phase 문서 금지 → context/knowledge/<tech>.md 에 작성할 것
 
@@ -90,32 +82,13 @@
   - CPU: `<request>` / `<limit>`
   - Memory: `<request>` / `<limit>`
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=<service-name> \
-  -n gikview --timeout=300s
-# 기대: exit 0
-
-# [check] no_warning_events
-kubectl get events -n gikview \
-  --field-selector involvedObject.name=<service-name>,type=Warning \
-  --sort-by='.lastTimestamp'
-# 기대: 최근 5분 내 출력 없음
-
-# [check] <service-specific-name>
-<실제 실행 가능한 명령어>
-# 기대: <출력에 포함되어야 할 문자열 또는 exit code>
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`
 - **검증**:
   1. <테스트 단계 1>
   2. <테스트 단계 2>
 
-### 5. 제약사항
+### 4. 제약사항
 <!-- 이 환경/이 배포에 특화된 하드 제약만 기재. 기술 일반 제약(기술 자체 특성)은 context/knowledge/<tech>.md에 작성할 것. -->
 - <반드시 지켜야 할 환경 특화 하드 제약. 없으면 이 섹션 전체 생략>
 

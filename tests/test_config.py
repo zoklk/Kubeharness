@@ -194,6 +194,8 @@ def test_real_cluster_yaml_loads():
 def test_real_all_envs_has_dev_and_prod():
     """실제 cluster.yaml에 dev, prod 두 환경이 정의되어 있다."""
     import harness.config as mod
+    if not mod._CONFIG_PATH.exists():
+        pytest.skip("cluster.yaml not present in this environment")
     envs = mod.all_envs()
     assert "dev" in envs, "cluster.yaml에 dev 환경이 없음"
     assert "prod" in envs, "cluster.yaml에 prod 환경이 없음"

@@ -32,21 +32,7 @@
   - CPU: `100m` / `300m`
   - Memory: `128Mi` / `256Mi`
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=edge-gateway \
-  -n gikview --timeout=300s
-# 기대: exit 0, 3 pod ready
-
-# [check] lease_holder
-kubectl get lease edge-gateway-leader -n gikview \
-  -o jsonpath='{.spec.holderIdentity}'
-# 기대: 비어있지 않은 값 (pod 이름)
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/pipeline/smoke-test-edge-gateway.sh`
 - **검증**:
   1. 3 pod Ready 확인
@@ -74,20 +60,7 @@ kubectl get lease edge-gateway-leader -n gikview \
   - CPU: `50m` / `200m`
   - Memory: `64Mi` / `128Mi`
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=esp32device-operator \
-  -n gikview --timeout=300s
-# 기대: exit 0
-
-# [check] crd_exists
-kubectl get crd esp32devices.gikview.io
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/pipeline/smoke-test-esp32device-operator.sh`
 - **검증**:
   1. CRD 등록 확인

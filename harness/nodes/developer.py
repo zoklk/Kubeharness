@@ -1,8 +1,8 @@
 """
 Developer 노드.
 
-1. context 로드: context/harness/developer_prompt.md (system prompt),
-   context/inject/conventions.md, context/inject/tech_stack.md,
+1. context 로드: context/prompts/developer_prompt.md (system prompt),
+   context/base/conventions.md, context/base/tech_stack.md,
    context/phases/<phase>.md 의 current sub_goal 섹션
 2. verification 실패 재시도 시: 실패 체크 상세 첨부, error_count 증가
 3. kagent MCP developer_tools (read-only) 첨부
@@ -27,7 +27,7 @@ from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
 _console = Console()
 
 _CONTEXT_DIR = PROJECT_ROOT / "context"
-_PROMPT_PATH = _CONTEXT_DIR / "harness" / "developer_prompt.md"
+_PROMPT_PATH = _CONTEXT_DIR / "prompts" / "developer_prompt.md"
 _ALLOWED_PREFIX = ARTIFACT_PREFIX
 _MAX_TOOL_TURNS = 20
 
@@ -55,8 +55,8 @@ def _load_system_prompt() -> str:
 # ── 컨텍스트 로드 ──────────────────────────────────────────────────────────────
 
 def _read_context(name: str) -> str:
-    """inject/ 우선, 없으면 context/ 루트에서 탐색 (phases/ 등 하위 경로 포함)."""
-    p = _CONTEXT_DIR / "inject" / name
+    """base/ 우선, 없으면 context/ 루트에서 탐색 (phases/ 등 하위 경로 포함)."""
+    p = _CONTEXT_DIR / "base" / name
     if not p.exists():
         p = _CONTEXT_DIR / name
     return p.read_text(encoding="utf-8") if p.exists() else f"[{name} not found]"

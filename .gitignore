@@ -28,7 +28,7 @@ logs/raw/*
 !logs/raw/.gitkeep
 
 # context: 네트워크 토폴로지·IP·SSH 포트 등 로컬 인프라 정보 포함 파일만 제외
-context/human/overview.md
+context/docs/overview.md
 
 # 환경별 클러스터 설정 (kubeconfig 경로·노드명 등 로컬 환경 종속)
 config/cluster.yaml

@@ -36,33 +36,14 @@
 - **DNS 디스커버리**: `EMQX_CLUSTER__DISCOVERY_STRATEGY: dns`, `EMQX_CLUSTER__DNS__RECORD_TYPE: srv` — domain_suffix는 환경별 values 파일 분리 (see: `context/knowledge/emqx.md`)
 - **Anti-affinity**: `requiredDuringSchedulingIgnoredDuringExecution`, key `app.kubernetes.io/name: emqx`
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=emqx \
-  -n gikview --timeout=300s
-# 기대: exit 0, 3 pod ready
-
-# [check] cluster_status
-kubectl exec -n gikview emqx-0 -- emqx ctl cluster status
-# 기대: 출력에 running_nodes 3개 (emqx@emqx-0, emqx-1, emqx-2) 포함
-
-# [check] no_warning_events
-kubectl get events -n gikview \
-  --field-selector involvedObject.name=emqx,type=Warning \
-  --sort-by='.lastTimestamp'
-# 기대: 최근 5분 내 출력 없음
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/messaging/smoke-test-emqx.sh`
 - **검증**:
   1. `emqx ctl cluster status` — running_nodes 3개 확인
   2. port-forward 경유 `mosquitto_pub/sub` — 1883 pub/sub 왕복 성공
   3. port-forward 경유 Dashboard API `/api/v5/nodes` — 3 노드 `running`
 
-### 5. 제약사항
+### 4. 제약사항
 - anti-affinity를 `required`로 설정해 3 Pod가 반드시 다른 노드에 배치되어야 함.
 
 ---
@@ -89,26 +70,13 @@ kubectl get events -n gikview \
   - CPU: 해당 없음
   - Memory: 해당 없음
 
-### 3. 검증 명령어
-```bash
-# [check] vip_assigned
-kubectl get svc emqx-lb -n gikview -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-# 기대: 빈 값이 아닌 VIP IP 출력 (예: 192.168.0.200)
-
-# [check] no_warning_events
-kubectl get events -n gikview \
-  --field-selector involvedObject.name=emqx-lb,type=Warning \
-  --sort-by='.lastTimestamp'
-# 기대: 최근 5분 내 출력 없음
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/messaging/smoke-test-cilium-l2-vip.sh`
 - **검증**:
   1. `kubectl get svc emqx-lb` — `EXTERNAL-IP` 비어있지 않음
   2. `nc -zv <VIP> 1883` — exit 0
 
-### 5. 제약사항
+### 4. 제약사항
 - `ExternalTrafficPolicy: Cluster` 필수. `Local` 사용 시 Cilium L2 Announcements known issue로 VIP 동작 불가.
 - Cilium L2 Announcements는 L2 세그먼트(동일 스위치/VLAN)에서만 동작. 개발(alpha 클러스터)에서 ARP 광고 검증은 제한적이며, 기능 검증은 운영(RPi4, Cilium 1.19.2) 환경에서 수행.
 - Cilium L2 Announcements 활성화(`l2announcements.enabled: true`, `externalIPs.enabled: true`)는 Cilium Helm 재배포 필요 — 하네스 범위 외, 사전 수동 적용.

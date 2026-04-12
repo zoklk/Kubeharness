@@ -31,28 +31,14 @@
   - CPU: `200m` / `500m`
   - Memory: `256Mi` / `512Mi`
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=influxdb \
-  -n gikview --timeout=300s
-# 기대: exit 0
-
-# [check] health
-kubectl exec -n gikview deploy/influxdb -- \
-  curl -sf http://localhost:8086/health
-# 기대: exit 0, 출력에 "pass" 포함
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/storage/smoke-test-influxdb.sh`
 - **검증**:
   1. port-forward 경유 `/health` — HTTP 200, `"pass"` 포함
   2. line protocol write (`/api/v2/write`) — HTTP 204
   3. query로 write한 데이터 확인 — 결과에 `smoke` 포함
 
-### 5. 제약사항
+### 4. 제약사항
 - `nodeSelector: kubernetes.io/hostname: <node_storage>` 고정 필수. 다른 노드 스케줄링 시 hostPath PV 마운트 실패.
 - `values.yaml`에 dev 노드(`alpha-w3`), `values-prod.yaml`에 prod 노드(`e-s3`)를 각각 `nodeSelector`로 명시. 하네스가 활성 환경에 맞는 values 파일을 자동 선택.
 

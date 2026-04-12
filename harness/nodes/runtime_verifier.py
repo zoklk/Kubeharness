@@ -54,7 +54,7 @@ def _print_phase2(phase2: dict) -> None:
         _console.print(f"  [yellow]→ {escape(sug)}[/yellow]")
 
 
-_PROMPT_PATH = PROJECT_ROOT / "context" / "harness" / "runtime_verifier_prompt.md"
+_PROMPT_PATH = PROJECT_ROOT / "context" / "prompts" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 10
 
 _DEFAULT_SYSTEM_PROMPT = (

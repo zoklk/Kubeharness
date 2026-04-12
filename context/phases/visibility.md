@@ -33,16 +33,7 @@
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=prometheus \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-prometheus.sh`
 - **검증**:
   1.
@@ -67,16 +58,7 @@ kubectl wait --for=condition=Ready pod \
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=grafana \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-grafana.sh`
 - **검증**:
   1.
@@ -101,14 +83,7 @@ kubectl wait --for=condition=Ready pod \
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] daemonset_ready
-kubectl rollout status daemonset/node-exporter -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-node-exporter.sh`
 - **검증**:
   1.
@@ -133,16 +108,7 @@ kubectl rollout status daemonset/node-exporter -n gikview --timeout=300s
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=emqx-exporter \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-emqx-exporter.sh`
 - **검증**:
   1.
@@ -167,16 +133,7 @@ kubectl wait --for=condition=Ready pod \
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=ebpf-tc-hook \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-ebpf-tc-hook.sh`
 - **검증**:
   1.

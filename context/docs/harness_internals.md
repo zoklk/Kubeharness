@@ -46,10 +46,10 @@ LLM은 다음을 **user message**로 받음:
 | 섹션 | 출처 | 내용 |
 |------|------|------|
 | Target | state | phase, sub_goal name |
-| Conventions | `context/inject/conventions.md` | 파일 경로 규칙, 릴리스 이름 등 |
-| Tech Stack | `context/inject/tech_stack.md` | 버전, 컴포넌트 정보 |
+| Conventions | `context/base/conventions.md` | 파일 경로 규칙, 릴리스 이름 등 |
+| Tech Stack | `context/base/tech_stack.md` | 버전, 컴포넌트 정보 |
 | Cluster Environments | `config/cluster.yaml` → Python 코드 주입 | active 환경, dev/prod domain_suffix, arch |
-| Sub-Goal Specification | `context/phases/<phase>.md` 에서 sub_goal 섹션 추출 | 목표 사양, 인터페이스, 검증 명령어 등 |
+| Sub-Goal Specification | `context/phases/<phase>.md` 에서 sub_goal 섹션 추출 | 목표 사양, 인터페이스, 제약사항 |
 | Existing Files | `edge-server/{helm,manifests,docker,ebpf}/<service_name>/` 스캔 | 파일 경로 목록만 주입. 내용은 `read_file` 툴로 조회 |
 | Smoke Tests | `edge-server/tests/<phase>/smoke-test-<sub_goal>.sh` | 파일 전체 내용 직접 주입. 없으면 생략. |
 | Dependency Services | sub_goal spec의 `dependency` 필드 파싱 | 의존 서비스명 목록 + kagent로 직접 조회 안내 |
@@ -258,6 +258,5 @@ phase 문서가 하네스와 어긋나는 경우 체크:
 - [ ] 환경별 다른 값(nodeSelector 등)은 values-dev.yaml / values-prod.yaml 분리로 설명했는가
 - [ ] smoke test 경로가 `edge-server/tests/<phase>/smoke-test-<sub_goal>.sh`인가
 - [ ] dependency 필드가 `` `service_name` `` 형식(백틱)으로 작성됐는가
-- [ ] 검증 명령어가 실행 가능한 bash 명령어인가 (설명문 금지)
 - [ ] kubectl wait timeout이 `300s`인가 (helm 배포 기준)
 - [ ] Helm release name이 `<service_name>-dev-v1`인가
