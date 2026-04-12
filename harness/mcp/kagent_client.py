@@ -9,12 +9,13 @@ langchain-mcp-adapters를 사용해 kagent-tools MCP 서버에서
 누락되어 서버가 요청을 거부한다.
 """
 
-from pathlib import Path
 from typing import Any
 import yaml
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "kagent.yaml"
+from harness.config import PROJECT_ROOT
+
+_CONFIG_PATH = PROJECT_ROOT / "config" / "kagent.yaml"
 
 
 def _load_config() -> dict:

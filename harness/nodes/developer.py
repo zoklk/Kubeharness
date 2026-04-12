@@ -55,11 +55,15 @@ def _load_system_prompt() -> str:
 # ── 컨텍스트 로드 ──────────────────────────────────────────────────────────────
 
 def _read_context(name: str) -> str:
-    """base/ 우선, 없으면 context/ 루트에서 탐색 (phases/ 등 하위 경로 포함)."""
+    """context/base/ 하위 파일 읽기 (conventions.md, tech_stack.md 전용)."""
     p = _CONTEXT_DIR / "base" / name
-    if not p.exists():
-        p = _CONTEXT_DIR / name
     return p.read_text(encoding="utf-8") if p.exists() else f"[{name} not found]"
+
+
+def _read_phase(phase: str) -> str:
+    """context/phases/<phase>.md 읽기."""
+    p = _CONTEXT_DIR / "phases" / f"{phase}.md"
+    return p.read_text(encoding="utf-8") if p.exists() else f"[{phase}.md not found]"
 
 
 def _extract_technology_name(sub_goal_spec: str, fallback: str) -> str:
@@ -447,7 +451,7 @@ async def developer_node(state: HarnessState) -> dict:
         error_count += 1
 
     # sub_goal_spec 추출 및 캐시 (runtime_verifier Phase 2에서 재사용)
-    phase_md = _read_context(f"phases/{sub_goal['phase']}.md")
+    phase_md = _read_phase(sub_goal["phase"])
     sub_goal_spec = _extract_subgoal_section(phase_md, sub_goal["name"])
     service_name = _extract_service_name(sub_goal_spec, fallback=sub_goal["name"])
     technology_name = _extract_technology_name(sub_goal_spec, fallback=service_name)

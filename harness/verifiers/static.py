@@ -11,27 +11,19 @@
 from pathlib import Path
 from typing import Optional
 
+from harness.config import ARTIFACT_PREFIX
 from harness.tools import helm, kubectl, yamllint, kubeconform, trivy, gitleaks, shell
+from harness.verifiers import check_result
 
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
-def _result(name: str, status: str, detail: str, log_dir: Optional[str], raw: str = "") -> dict:
-    log_path = None
-    if log_dir:
-        p = Path(log_dir) / f"{name}.log"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(raw or detail, encoding="utf-8")
-        log_path = str(p)
-    return {"name": name, "status": status, "detail": detail, "log_path": log_path}
-
-
 def _from_run(name: str, r: dict, log_dir: Optional[str]) -> dict:
     if r["exit_code"] == -1 and "[Errno 2]" in r.get("stderr", ""):
-        return _result(name, "skip", f"{name} not installed", log_dir)
+        return check_result(name, "skip", f"{name} not installed", log_dir)
     status = "pass" if r["exit_code"] == 0 else "fail"
     detail = (r["stdout"] + r["stderr"]).strip() or "OK"
-    return _result(name, status, detail, log_dir, r["stdout"] + r["stderr"])
+    return check_result(name, status, detail, log_dir, r["stdout"] + r["stderr"])
 
 
 # ── 체크 함수 ─────────────────────────────────────────────────────────────────
@@ -87,7 +79,7 @@ def check_helm_dry_run_server(
     # immutable 충돌은 stderr에 포함되므로 stderr 우선
     detail = (r["stderr"] or r["stdout"]).strip() or "OK"
     status = "pass" if r["exit_code"] == 0 else "fail"
-    return _result("helm_dry_run_server", status, detail, log_dir, r["stdout"] + r["stderr"])
+    return check_result("helm_dry_run_server", status, detail, log_dir, r["stdout"] + r["stderr"])
 
 
 def check_kubectl_dry_run_server(
@@ -98,7 +90,7 @@ def check_kubectl_dry_run_server(
     r = kubectl.dry_run_server(manifest_path, namespace)
     detail = (r["stderr"] or r["stdout"]).strip() or "OK"
     status = "pass" if r["exit_code"] == 0 else "fail"
-    return _result("kubectl_dry_run_server", status, detail, log_dir, r["stdout"] + r["stderr"])
+    return check_result("kubectl_dry_run_server", status, detail, log_dir, r["stdout"] + r["stderr"])
 
 
 def check_dockerfile(docker_dir: str, log_dir: Optional[str] = None) -> dict:
@@ -110,7 +102,7 @@ def check_dockerfile(docker_dir: str, log_dir: Optional[str] = None) -> dict:
     dockerfile = Path(docker_dir) / "Dockerfile"
     if not dockerfile.exists():
         detail = f"Dockerfile not found at {dockerfile}"
-        return _result("dockerfile", "fail", detail, log_dir, detail)
+        return check_result("dockerfile", "fail", detail, log_dir, detail)
 
     r = shell.run(["hadolint", str(dockerfile)])
     return _from_run("dockerfile", r, log_dir)
@@ -118,12 +110,12 @@ def check_dockerfile(docker_dir: str, log_dir: Optional[str] = None) -> dict:
 
 def check_path_prefix(
     files: list[str],
-    allowed_prefix: str = "edge-server/",
+    allowed_prefix: str = ARTIFACT_PREFIX,
     log_dir: Optional[str] = None,
 ) -> dict:
     """Developer가 생성한 파일이 모두 allowed_prefix로 시작하는지 검증."""
     violations = [f for f in files if not f.startswith(allowed_prefix)]
     if violations:
         detail = f"Path prefix violation: {violations}"
-        return _result("path_prefix", "fail", detail, log_dir, detail)
-    return _result("path_prefix", "pass", f"All files under {allowed_prefix}", log_dir)
+        return check_result("path_prefix", "fail", detail, log_dir, detail)
+    return check_result("path_prefix", "pass", f"All files under {allowed_prefix}", log_dir)

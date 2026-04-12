@@ -54,7 +54,8 @@ def _print_phase2(phase2: dict) -> None:
         _console.print(f"  [yellow]→ {escape(sug)}[/yellow]")
 
 
-_PROMPT_PATH = PROJECT_ROOT / "context" / "prompts" / "runtime_verifier_prompt.md"
+_CONTEXT_DIR = PROJECT_ROOT / "context"
+_PROMPT_PATH = _CONTEXT_DIR / "prompts" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 10
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -92,8 +93,7 @@ async def _load_tools() -> tuple[list, list[dict]]:
         tool_objs = await get_kagent_tools("runtime_verifier_tools")
         return tool_objs, tools_as_chat_dicts(tool_objs)
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("kagent tools unavailable (runtime_verifier): %s", e)
+        _console.print(f"  [yellow]⚠ kagent tools unavailable (runtime_verifier): {e}[/yellow]")
         return [], []
 
 
@@ -172,7 +172,7 @@ def _save_llm_findings(technology_name: str, phase2: dict, sub_goal_name: str, p
     if not observations and not suggestions:
         return
 
-    knowledge_dir = PROJECT_ROOT / "context" / "knowledge"
+    knowledge_dir = _CONTEXT_DIR / "knowledge"
     findings_path = knowledge_dir / f"{technology_name}-llm-findings.md"
     knowledge_dir.mkdir(parents=True, exist_ok=True)
 

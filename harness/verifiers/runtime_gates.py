@@ -12,7 +12,7 @@ run_runtime_phase1(service_name, sub_goal_name, phase_name) -> {"passed": bool, 
   namespace      : <cluster.yaml namespace 필드 (기본 gikview)>
   release_name   : <service>-dev-v1
   label_selector : app.kubernetes.io/name=<service>
-  smoke_test     : edge-server/tests/<phase>/<sub_goal>.sh (없으면 skip)
+  smoke_test     : edge-server/tests/<phase>/smoke-test-<sub_goal>.sh (없으면 skip)
 
 events 조회는 Phase 2 LLM이 kagent로 직접 수행. Phase 1에서는 하지 않음.
 """
@@ -22,8 +22,9 @@ import yaml
 from pathlib import Path
 from typing import Optional
 
-from harness.config import NAMESPACE, PROJECT_ROOT, label_selector, release_name
+from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, cluster_config, label_selector, release_name
 from harness.tools import helm, kubectl, shell
+from harness.verifiers import check_result
 
 _BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
 
@@ -36,17 +37,6 @@ _TERMINAL_STATES = frozenset({
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
-def _result(name: str, status: str, detail: str,
-            log_dir: Optional[str] = None, raw: str = "") -> dict:
-    log_path = None
-    if log_dir:
-        p = Path(log_dir) / f"{name}.log"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(raw or detail, encoding="utf-8")
-        log_path = str(p)
-    return {"name": name, "status": status, "detail": detail, "log_path": log_path}
-
-
 def _skip(name: str) -> dict:
     return {"name": name, "status": "skip", "detail": "prior step failed", "log_path": None}
 
@@ -54,7 +44,7 @@ def _skip(name: str) -> dict:
 def _from_run(name: str, r: dict, log_dir: Optional[str]) -> dict:
     status = "pass" if r["exit_code"] == 0 else "fail"
     detail = (r["stderr"] or r["stdout"]).strip() or "OK"
-    return _result(name, status, detail, log_dir, r["stdout"] + r["stderr"])
+    return check_result(name, status, detail, log_dir, r["stdout"] + r["stderr"])
 
 
 # ── 빌드 설정 ─────────────────────────────────────────────────────────────────
@@ -78,7 +68,7 @@ def _run_docker_build(
     반환: [docker_build 체크, docker_push 체크] — 순서대로 실행, fail 시 이후 skip.
     Dockerfile 없으면 빈 리스트 반환 (skip 없음, 해당 서비스에 불필요한 스텝).
     """
-    docker_dir = PROJECT_ROOT / f"edge-server/docker/{service_name}"
+    docker_dir = PROJECT_ROOT / f"{ARTIFACT_PREFIX}docker/{service_name}"
     if not (docker_dir / "Dockerfile").exists():
         return []
 
@@ -154,13 +144,11 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
     Returns:
         {"passed": bool, "checks": [{"name", "status", "detail", "log_path"}, ...]}
     """
-    from harness.config import cluster_config
-
-    chart_path = str(PROJECT_ROOT / f"edge-server/helm/{service_name}")
-    manifest_dir = str(PROJECT_ROOT / f"edge-server/manifests/{service_name}")
+    chart_path = str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}")
+    manifest_dir = str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}manifests/{service_name}")
     rname = release_name(service_name)
     lsel = label_selector(service_name)
-    smoke_test_path = PROJECT_ROOT / f"edge-server/tests/{phase_name}/smoke-test-{sub_goal_name}.sh"
+    smoke_test_path = PROJECT_ROOT / f"{ARTIFACT_PREFIX}tests/{phase_name}/smoke-test-{sub_goal_name}.sh"
 
     has_helm = Path(chart_path).is_dir()
     has_manifests = Path(manifest_dir).is_dir()
@@ -169,7 +157,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
 
     # ① 배포 아티팩트 없음 → 즉시 실패
     if not has_helm and not has_manifests:
-        checks.append(_result(
+        checks.append(check_result(
             "deploy", "fail",
             f"no helm chart at 'edge-server/helm/{service_name}' or "
             f"manifests at 'edge-server/manifests/{service_name}'",
@@ -189,8 +177,8 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
         else [_skip("smoke_test")]
     )
 
-    if not registry and (PROJECT_ROOT / f"edge-server/docker/{service_name}" / "Dockerfile").exists():
-        checks.append(_result(
+    if not registry and (PROJECT_ROOT / f"{ARTIFACT_PREFIX}docker/{service_name}" / "Dockerfile").exists():
+        checks.append(check_result(
             "docker_build", "fail",
             "config/build.yaml missing or 'registry' not set",
             log_dir,
@@ -208,9 +196,9 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
     if has_helm:
         active = cluster_config().get("_active", "dev")
         values_files = [
-            str(PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}")
+            str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}/{vf}")
             for vf in ["values.yaml", f"values-{active}.yaml"]
-            if (PROJECT_ROOT / f"edge-server/helm/{service_name}/{vf}").exists()
+            if (PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}/{vf}").exists()
         ]
 
         # terminal 상태 pod만 선제 삭제: CrashLoopBackOff back-off 축적 pod가 rolling update를 막는 것을 방지
@@ -250,7 +238,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
             pods_r = kubectl.get_pods(NAMESPACE, label=lsel)
             if _is_terminal_failure(pods_r):
                 detail = _terminal_detail(pods_r) or (r60["stderr"] or r60["stdout"]).strip() or "terminal failure after 60s"
-                checks.append(_result("kubectl_wait", "fail",
+                checks.append(check_result("kubectl_wait", "fail",
                                       f"early exit: {detail}",
                                       log_dir, r60["stdout"] + r60["stderr"]))
             else:
@@ -276,7 +264,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
         if checks[-1]["status"] == "fail":
             return {"passed": False, "checks": checks}
     else:
-        checks.append(_result("smoke_test", "skip",
+        checks.append(check_result("smoke_test", "skip",
                                f"no smoke test at {smoke_test_path.relative_to(PROJECT_ROOT)}", log_dir))
 
     return {"passed": True, "checks": checks}

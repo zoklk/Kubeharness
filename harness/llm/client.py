@@ -1,10 +1,11 @@
 import os
 import time
 import yaml
-from pathlib import Path
 from typing import Any
 
-_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "llm.yaml"
+from harness.config import PROJECT_ROOT
+
+_CONFIG_PATH = PROJECT_ROOT / "config" / "llm.yaml"
 
 
 def _load_config() -> dict:

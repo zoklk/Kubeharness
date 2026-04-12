@@ -10,7 +10,7 @@ Static Verifier 노드. LLM 없음, 순수 결정적.
 
 from pathlib import Path
 
-from harness.config import NAMESPACE, PROJECT_ROOT, label_selector, release_name
+from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, cluster_config, label_selector, release_name
 from harness.state import HarnessState
 from harness.verifiers import static
 
@@ -18,16 +18,15 @@ from harness.verifiers import static
 # ── artifacts 식별 ────────────────────────────────────────────────────────────
 
 def _chart_path(service_name: str) -> str:
-    return str(PROJECT_ROOT / f"edge-server/helm/{service_name}")
+    return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}")
 
 
 def _manifest_dir(service_name: str) -> str:
-    return str(PROJECT_ROOT / f"edge-server/manifests/{service_name}")
+    return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}manifests/{service_name}")
 
 
 def _values_files(chart_path: str) -> list[str]:
     """존재하는 values 파일만 반환. active 환경의 오버라이드 파일을 사용."""
-    from harness.config import cluster_config
     active = cluster_config().get("_active", "dev")
     return [
         vf for vf in [
@@ -39,27 +38,26 @@ def _values_files(chart_path: str) -> list[str]:
 
 
 def _docker_dir(service_name: str) -> str:
-    return str(PROJECT_ROOT / f"edge-server/docker/{service_name}")
+    return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}docker/{service_name}")
 
 
 def _has_helm(files: list[str], service_name: str) -> bool:
-    # files는 edge-server/ 상대 경로이므로 prefix 검사도 상대 경로로
-    prefix = f"edge-server/helm/{service_name}/"
+    prefix = f"{ARTIFACT_PREFIX}helm/{service_name}/"
     return any(f.startswith(prefix) for f in files)
 
 
 def _has_manifests(files: list[str], service_name: str) -> bool:
-    prefix = f"edge-server/manifests/{service_name}/"
+    prefix = f"{ARTIFACT_PREFIX}manifests/{service_name}/"
     return any(f.startswith(prefix) for f in files)
 
 
 def _has_docker(files: list[str], service_name: str) -> bool:
-    prefix = f"edge-server/docker/{service_name}/"
+    prefix = f"{ARTIFACT_PREFIX}docker/{service_name}/"
     return any(f.startswith(prefix) for f in files)
 
 
 def _has_ebpf(files: list[str]) -> bool:
-    return any(f.startswith("edge-server/ebpf/") for f in files)
+    return any(f.startswith(f"{ARTIFACT_PREFIX}ebpf/") for f in files)
 
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
