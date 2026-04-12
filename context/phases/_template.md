@@ -84,9 +84,6 @@
 
 ### 3. Smoke Test
 - **경로**: `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`
-- **검증**:
-  1. <테스트 단계 1>
-  2. <테스트 단계 2>
 
 ### 4. 제약사항
 <!-- 이 환경/이 배포에 특화된 하드 제약만 기재. 기술 일반 제약(기술 자체 특성)은 context/knowledge/<tech>.md에 작성할 것. -->

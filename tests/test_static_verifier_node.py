@@ -333,7 +333,7 @@ def test_values_files_uses_active_env_dev(tmp_path):
     (tmp_path / "values-dev.yaml").write_text("x: 2\n")
     (tmp_path / "values-prod.yaml").write_text("x: 3\n")
 
-    with patch("harness.config.cluster_config", return_value={"_active": "dev"}):
+    with patch("harness.nodes.static_verifier.cluster_config", return_value={"_active": "dev"}):
         result = _values_files(str(tmp_path))
 
     assert str(tmp_path / "values.yaml") in result
@@ -349,7 +349,7 @@ def test_values_files_uses_active_env_prod(tmp_path):
     (tmp_path / "values-dev.yaml").write_text("x: 2\n")
     (tmp_path / "values-prod.yaml").write_text("x: 3\n")
 
-    with patch("harness.config.cluster_config", return_value={"_active": "prod"}):
+    with patch("harness.nodes.static_verifier.cluster_config", return_value={"_active": "prod"}):
         result = _values_files(str(tmp_path))
 
     assert str(tmp_path / "values.yaml") in result
@@ -364,7 +364,7 @@ def test_values_files_missing_env_file_excluded(tmp_path):
     (tmp_path / "values.yaml").write_text("x: 1\n")
     # values-dev.yaml 없음
 
-    with patch("harness.config.cluster_config", return_value={"_active": "dev"}):
+    with patch("harness.nodes.static_verifier.cluster_config", return_value={"_active": "dev"}):
         result = _values_files(str(tmp_path))
 
     assert result == [str(tmp_path / "values.yaml")]
