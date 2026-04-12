@@ -17,12 +17,12 @@
 - **technology**: `emqx`
 
 ### 1. 목표 사양
-- **기능**: EMQX 5.8.6 3-Pod StatefulSet HA 클러스터를 `gikview` 네임스페이스에 구축.
+- **기능**: EMQX 5.8.6 3-Pod StatefulSet HA 클러스터를 `{NAMESPACE}` 네임스페이스에 구축.
 - **디스커버리**: K3s DNS 기반의 정적 클러스터 디스커버리 사용.
 - **스케줄링**: 각 Pod는 하드웨어 장애 대비를 위해 서로 다른 노드에 배치(Anti-affinity).
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
   - `mqtt: 1883` — 평문, 내부망 (mTLS 설정 전 검증용)
   - `dashboard: 18083` — EMQX Dashboard API
@@ -50,7 +50,7 @@
 - **의존성**: `emqx` 서비스가 선행 배포되어 있어야 함.
 
 ### 2. 인터페이스
-- **Namespace**: `gikview` (Service), `kube-system` (Cilium Config)
+- **Namespace**: `{NAMESPACE}` (Service), `kube-system` (Cilium Config)
 - **Ports**: 1883 (MQTT), 8883 (MQTTS)
 - **Labels**: `app.kubernetes.io/name: emqx` (Service selector 연동)
 - **dependency**: `emqx`

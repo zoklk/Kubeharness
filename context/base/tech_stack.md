@@ -9,7 +9,7 @@
 - Kubernetes: 1.34.3
 - CNI: Cilium 1.18.6 (kubeProxyReplacement=true)
 - 노드: `alpha-m1`(cp), `alpha-w1/w2/w3`(worker)
-- 네임스페이스: `gikview`
+- 네임스페이스: `{NAMESPACE}`
 
 ### 운영 (엣지, 본 하네스 범위 밖)
 - 노드: `e-s1/e-s2/e-s3` (RPi4 4GB, Ubuntu Server 24.04 arm64)

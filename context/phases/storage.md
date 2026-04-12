@@ -21,7 +21,7 @@
 - **이미지**: Docker Hub 공개 (`influxdb:3`)
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
   - `http: 8086` — HTTP API (write / query)
 - **Labels**: `app.kubernetes.io/name: influxdb`

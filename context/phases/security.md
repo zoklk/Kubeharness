@@ -21,7 +21,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: step-ca`
 - **dependency**: 없음

@@ -25,7 +25,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: prometheus`
 - **dependency**: 없음
@@ -50,7 +50,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: grafana`
 - **dependency**: `prometheus`
@@ -75,7 +75,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: node-exporter`
 - **dependency**: `prometheus`
@@ -100,7 +100,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: emqx-exporter`
 - **dependency**: `emqx`, `prometheus`
@@ -125,7 +125,7 @@
 - **이미지**: 커스텀 빌드 (`ghcr.io/<org>/ebpf-tc-hook:<tag>`)
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: ebpf-tc-hook`
 - **dependency**: `emqx`, `prometheus`

@@ -22,7 +22,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from harness.config import NAMESPACE, PROJECT_ROOT
+from harness.config import NAMESPACE, PROJECT_ROOT, build_cluster_env_section
 from harness.llm import client as llm
 from harness.llm.artifacts import scan_service_files
 from harness.llm.context import extract_dependencies, read_knowledge
@@ -156,6 +156,21 @@ def _parse_phase2(content: str) -> dict:
     }
 
 
+_MAX_FINDINGS_PER_SUBGOAL = 3
+
+
+def _trim_findings(text: str, sub_goal_name: str) -> str:
+    """동일 sub_goal 항목을 최대 (_MAX_FINDINGS_PER_SUBGOAL - 1)개만 남긴다 (새 항목 추가 공간 확보)."""
+    entries = re.split(r'(?=^## )', text, flags=re.MULTILINE)
+    entries = [e for e in entries if e.strip()]
+
+    same = [e for e in entries if f"| sub_goal: {sub_goal_name}" in e]
+    other = [e for e in entries if f"| sub_goal: {sub_goal_name}" not in e]
+
+    kept = same[-(_MAX_FINDINGS_PER_SUBGOAL - 1):]
+    return "".join(other + kept)
+
+
 def _save_llm_findings(technology_name: str, phase2: dict, sub_goal_name: str, phase_name: str) -> None:
     """
     Phase 2 LLM 진단 결과를 context/knowledge/<technology_name>-llm-findings.md 에 append.
@@ -194,8 +209,8 @@ def _save_llm_findings(technology_name: str, phase2: dict, sub_goal_name: str, p
         "---\n"
     )
 
-    with findings_path.open("a", encoding="utf-8") as f:
-        f.write(entry)
+    trimmed = _trim_findings(existing_text, sub_goal_name)
+    findings_path.write_text(trimmed + entry, encoding="utf-8")
 
     n_obs = len(observations)
     n_sug = len(suggestions)
@@ -254,6 +269,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
                 f"Service: {service_name}\n"
                 f"Phase: {sub_goal.get('phase', '')}\n\n"
                 + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
+                + build_cluster_env_section(include_authoring_hint=False) + "\n\n"
                 + _phase1_summary(phase1)
                 + _artifact_files_listing(service_name)
                 + ("".join(f"\n\n{title}\n{content}" for title, content in knowledge_parts) if knowledge_parts else "")

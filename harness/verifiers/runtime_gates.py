@@ -127,6 +127,31 @@ def _terminal_detail(pods_r: dict) -> str:
     return "; ".join(parts[:3])
 
 
+# ── StatefulSet stale revision 감지 ──────────────────────────────────────────
+
+def _detect_stale_statefulset_revision(service_name: str, namespace: str) -> bool:
+    """StatefulSet updateRevision과 실제 pod revision이 다르면 True."""
+    r_sts = shell.run(["kubectl", "get", "statefulset", service_name, "-n", namespace, "-o", "json"])
+    if r_sts["exit_code"] != 0:
+        return False  # StatefulSet 아님
+    try:
+        sts = json.loads(r_sts["stdout"])
+    except (json.JSONDecodeError, ValueError):
+        return False
+    update_rev = sts.get("status", {}).get("updateRevision", "")
+    if not update_rev:
+        return False
+
+    r_pods = kubectl.get_pods(namespace, label=label_selector(service_name))
+    if r_pods["exit_code"] != 0:
+        return False
+    pods = json.loads(r_pods["stdout"]).get("items", [])
+    return any(
+        p.get("metadata", {}).get("labels", {}).get("controller-revision-hash", "") != update_rev
+        for p in pods
+    )
+
+
 # ── 메인 게이트 함수 ──────────────────────────────────────────────────────────
 
 def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, log_dir: Optional[str] = None) -> dict:
@@ -238,7 +263,19 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
                                       log_dir, r60["stdout"] + r60["stderr"]))
             else:
                 r240 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="240s")
-                checks.append(_from_run("kubectl_wait", r240, log_dir))
+                if r240["exit_code"] == 0:
+                    checks.append(_from_run("kubectl_wait", r240, log_dir))
+                else:
+                    r_pods_after = kubectl.get_pods(NAMESPACE, label=lsel)
+                    if (
+                        not _is_terminal_failure(r_pods_after)
+                        and _detect_stale_statefulset_revision(service_name, NAMESPACE)
+                    ):
+                        shell.run(["kubectl", "rollout", "restart", f"statefulset/{service_name}", "-n", NAMESPACE])
+                        r_restart = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="300s")
+                        checks.append(_from_run("rollout_restart_recovery", r_restart, log_dir))
+                    else:
+                        checks.append(_from_run("kubectl_wait", r240, log_dir))
 
         if checks[-1]["status"] == "fail":
             checks.append(_skip("smoke_test"))

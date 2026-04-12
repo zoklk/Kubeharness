@@ -23,7 +23,7 @@
 - **이미지**: 커스텀 빌드 (`ghcr.io/<org>/edge-gateway:<tag>`, linux/amd64,linux/arm64) — 하네스가 빌드·푸시, Developer는 소스코드와 Dockerfile만 작성
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**: 없음 (외부 노출 불필요)
 - **Labels**: `app.kubernetes.io/name: edge-gateway`
 - **dependency**: `emqx`, `influxdb`
@@ -51,7 +51,7 @@
 - **이미지**: 커스텀 빌드 (`ghcr.io/<org>/esp32device-operator:<tag>`, linux/amd64,linux/arm64) — 하네스가 빌드·푸시, Developer는 소스코드와 Dockerfile만 작성
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**: 없음
 - **Labels**: `app.kubernetes.io/name: esp32device-operator`
 - **dependency**: 없음

@@ -72,7 +72,7 @@
 - **이미지**: `Docker Hub 공개 (<image>:<tag>)` 또는 `커스텀 빌드 (ghcr.io/<org>/<service-name>:<tag>)`
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
   - `<port-name>: <number>` — <용도>
 - **Labels**: `app.kubernetes.io/name: <service-name>`

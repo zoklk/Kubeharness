@@ -87,12 +87,12 @@ Read the failure reason carefully, then make the **minimum necessary change** to
 
 ## Smoke Tests (provided by harness)
 
-When a smoke test script exists for the current sub_goal, the harness will include a **Smoke Tests** section in your user message with the full script content.
+When a smoke test script exists for the current sub_goal, the harness will include a **`## Smoke Tests`** section in your user message. It contains the full bash script (inside ` ```bash ``` ` fences) that the Runtime Verifier will execute after deployment.
 
 - **Treat the smoke test as the acceptance criterion.** Your implementation must make every assertion in the script pass.
 - Read the script carefully before writing any files: it tells you which ports, endpoints, topics, and API responses the service must expose.
 - Do not modify or reproduce the smoke test script — it is read-only and managed outside `edge-server/`.
-- If no Smoke Tests section appears, the service has no automated smoke test; rely on the sub_goal spec alone.
+- If no `## Smoke Tests` section appears, the service has no automated smoke test; rely on the sub_goal spec alone.
 
 ## Technology Knowledge
 

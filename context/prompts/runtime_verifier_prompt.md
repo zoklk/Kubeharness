@@ -37,8 +37,8 @@ All scoped to namespace `{NAMESPACE}` unless told otherwise.
 DNS/클러스터 discovery 문제 진단 시 pod 내부에서 직접 실행:
 
 ```
-# DNS 해석 확인
-ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["nslookup", "emqx-headless.{NAMESPACE}.svc.cluster.local"])
+# DNS 해석 확인 — domain_suffix는 user message의 ## Cluster Environments 섹션에서 확인
+ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["nslookup", "emqx-headless.{NAMESPACE}.svc.<domain_suffix>"])
 
 # EMQX 클러스터 상태
 ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["emqx", "ctl", "cluster", "status"])
@@ -46,6 +46,16 @@ ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["emqx", "ctl", "c
 # 포트 연결 확인
 ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["curl", "-s", "http://localhost:18083/api/v5/nodes"])
 ```
+
+## DNS 진단 주의사항
+
+DNS/connectivity 테스트 전에 반드시:
+1. user message의 `## Cluster Environments` 섹션에서 활성 env의 `domain_suffix` 확인
+2. Technology Knowledge에 명시된 DNS 이름 값 우선 사용
+3. **Running + Ready 상태인 파드에서만** 네트워크/DNS 테스트 실행
+   - CrashLoopBackOff 파드에서의 실패는 파드 문제이지 DNS/설정 문제가 아님
+4. Knowledge가 DNS 이름을 명시하면, 테스트 실패만으로 그 값이 틀렸다고
+   결론 내리지 말 것. 파드 상태를 먼저 확인.
 
 ## Findings are saved automatically
 
@@ -55,6 +65,13 @@ This means:
 - Precise, actionable observations have lasting value beyond this iteration
 - Vague suggestions ("fix the config") are less useful than specific ones (file path + key + before→after)
 - Observations that turn out to be wrong will mislead future attempts — only include what you actually confirmed via tools
+
+## Findings 품질 기준
+
+Technology Knowledge에 이미 명시된 설정값과 다른 값을 suggestions에 쓸 때는,
+반드시 그 근거를 observations에 포함해야 함
+(예: pod log의 실제 에러 메시지, Running 파드에서의 테스트 결과).
+단순 DNS 조회 실패만으로 Knowledge 문서를 override하지 말 것.
 
 ## Output format (STRICT JSON)
 

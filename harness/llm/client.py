@@ -261,7 +261,8 @@ def _chat_gemini(
     )
 
     from google.genai.errors import ServerError as GeminiServerError
-    retryable = (GeminiServerError,)
+    import httpx
+    retryable = (GeminiServerError, httpx.RemoteProtocolError)
     raw = _retry(lambda: client.models.generate_content(
         model=model,
         contents=contents,

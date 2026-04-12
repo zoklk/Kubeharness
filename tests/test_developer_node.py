@@ -741,8 +741,8 @@ def test_build_user_message_cluster_environments_present(tmp_path, monkeypatch):
     fake_active = {"domain_suffix": "alpha.local", "arch": "amd64", "_active": "dev"}
 
     with (
-        _patch("harness.nodes.developer.all_envs", return_value=fake_envs),
-        _patch("harness.nodes.developer.cluster_config", return_value=fake_active),
+        _patch("harness.config.all_envs", return_value=fake_envs),
+        _patch("harness.config.cluster_config", return_value=fake_active),
     ):
         msg = _build_user_message(_state(), "", SERVICE, SERVICE)
 
@@ -764,8 +764,8 @@ def test_build_user_message_generic_dns_example(tmp_path, monkeypatch):
     fake_active = {"domain_suffix": "alpha.local", "arch": "amd64", "_active": "dev"}
 
     with (
-        _patch("harness.nodes.developer.all_envs", return_value=fake_envs),
-        _patch("harness.nodes.developer.cluster_config", return_value=fake_active),
+        _patch("harness.config.all_envs", return_value=fake_envs),
+        _patch("harness.config.cluster_config", return_value=fake_active),
     ):
         msg = _build_user_message(_state(), "", SERVICE, SERVICE)
 
@@ -786,8 +786,8 @@ def test_build_user_message_domain_suffix_in_env_section(tmp_path, monkeypatch):
     fake_active = {"domain_suffix": "test.local", "arch": "amd64", "_active": "dev"}
 
     with (
-        _patch("harness.nodes.developer.all_envs", return_value=fake_envs),
-        _patch("harness.nodes.developer.cluster_config", return_value=fake_active),
+        _patch("harness.config.all_envs", return_value=fake_envs),
+        _patch("harness.config.cluster_config", return_value=fake_active),
     ):
         msg = _build_user_message(_state(), "", SERVICE, SERVICE)
 

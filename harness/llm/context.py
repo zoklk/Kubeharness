@@ -2,7 +2,7 @@
 
 import re
 
-from harness.config import PROJECT_ROOT
+from harness.config import NAMESPACE, PROJECT_ROOT
 
 _KNOWLEDGE_DIR = PROJECT_ROOT / "context" / "knowledge"
 
@@ -18,13 +18,13 @@ def read_knowledge(technology_name: str, dep_names: list[str] | None = None) -> 
     for name in [technology_name] + (dep_names or []):
         baseline = _KNOWLEDGE_DIR / f"{name}.md"
         if baseline.exists():
-            content = baseline.read_text(encoding="utf-8").strip()
+            content = baseline.read_text(encoding="utf-8").strip().replace("{NAMESPACE}", NAMESPACE)
             if content:
                 results.append((f"## Technology Knowledge: {name}", content))
 
         findings = _KNOWLEDGE_DIR / f"{name}-llm-findings.md"
         if findings.exists():
-            content = findings.read_text(encoding="utf-8").strip()
+            content = findings.read_text(encoding="utf-8").strip().replace("{NAMESPACE}", NAMESPACE)
             if content:
                 results.append((
                     f"## Previous Diagnostic Findings (Unverified) [{name}]",

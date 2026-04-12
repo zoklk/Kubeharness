@@ -110,7 +110,7 @@ You MUST write `values-dev.yaml` AND `values-prod.yaml` for EVERY service.
 - DNS example: `<service>-headless.gikview.svc.cluster.local`
 ```
 
-→ **node_storage, node_monitoring 등 환경별 다른 값은 phase 문서에 직접 기재하거나 cluster.yaml에 추가한 뒤 developer.py의 env_detail 주입 로직에도 추가해야 함.**
+→ **node_storage, node_monitoring 등 환경별 다른 값은 phase 문서에 직접 기재하거나 cluster.yaml에 추가한 뒤 `harness/config.py`의 `build_cluster_env_section()`에도 추가해야 함.** Developer와 Runtime Verifier 양쪽이 이 함수를 공유하므로 한 곳만 수정하면 된다.
 
 ### LLM 출력 형식
 
@@ -196,10 +196,11 @@ LLM 없음. 결정적 실행.
 - stderr/stdout에 `"immutable"` 포함 (일반적인 k8s immutable field 오류)
 - stderr/stdout에 `"forbidden"` AND `"statefulset spec"` 포함 (volumeClaimTemplates 변경 등)
 
-**kubectl wait 2단계 상세**:
+**kubectl wait 2단계 + stale revision 복구 상세**:
 - 60s 경과 후 pod 상태 확인 (`kubectl get pods -o json`)
 - terminal 상태(`CrashLoopBackOff`, `ImagePullBackOff`, `ErrImagePull`, `Error`, `OOMKilled` 등): 즉시 fail (조기 종료)
 - 기동 중(`Pending`, `Init`, `ContainerCreating` 등): 240s 추가 대기 (총 최대 300s)
+- **240s 실패 + not terminal + StatefulSet `updateRevision` 불일치** → `kubectl rollout restart statefulset/<service>` 후 300s 재대기 (check name: `rollout_restart_recovery`)
 
 **주의**: Helm은 `--wait` 없이 실행 (빠른 적용). 파드 Ready 게이트는 `kubectl wait` 2단계.
 
@@ -214,6 +215,7 @@ LLM 없음. 결정적 실행.
   | 섹션 | 출처 | 목적 |
   |------|------|------|
   | Sub-Goal Specification | `state.sub_goal_spec` (developer가 캐시) | 목표 사양 |
+  | Cluster Environments | `build_cluster_env_section(include_authoring_hint=False)` | 활성 env, domain_suffix — DNS 진단에 올바른 도메인 사용하도록 |
   | Phase 1 Results | `run_runtime_phase1()` 결과 | 실패한 체크 상세 |
   | Artifact Files | `edge-server/{helm,manifests,docker}/<service>/` 스캔 | 정확한 파일 경로 참조 |
   | Technology Knowledge | `context/knowledge/<tech>.md` + dep knowledge (`harness.llm.context.read_knowledge`) | 기술 기반 지식, 환경별 설정값 (없으면 생략) |
@@ -222,6 +224,7 @@ LLM 없음. 결정적 실행.
 - 응답: `{"passed": false, "observations": [...], "suggestions": [...]}`
 - `passed`는 항상 `false` (Phase 1이 실패했으므로)
 - Tool loop 최대 **10턴**. 초과 시 tools 없이 최종 응답 요청.
+- **Findings 저장**: 응답은 `context/knowledge/<tech>-llm-findings.md`에 저장. 동일 sub_goal 항목은 최신 3개만 유지 (`_MAX_FINDINGS_PER_SUBGOAL = 3`). 다른 sub_goal 항목은 보존.
 
 ### 라우팅
 
