@@ -45,6 +45,15 @@ ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["emqx", "ctl", "c
 ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["curl", "-s", "http://localhost:18083/api/v5/nodes"])
 ```
 
+## Findings are saved automatically
+
+Your Phase 2 output is **automatically appended** to `context/knowledge/<technology>-llm-findings.md` after each run. The Developer node reads this file on future attempts as diagnostic hints.
+
+This means:
+- Precise, actionable observations have lasting value beyond this iteration
+- Vague suggestions ("fix the config") are less useful than specific ones (file path + key + before→after)
+- Observations that turn out to be wrong will mislead future attempts — only include what you actually confirmed via tools
+
 ## Output format (STRICT JSON)
 
 Your response must be a single JSON object. No prose outside it:

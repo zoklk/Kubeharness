@@ -5,6 +5,32 @@
 
 ---
 
+## 0. 핵심 철학
+
+GikView 하네스는 **쿠버네티스(Kubernetes) 방식의 선언적 관리**를 LLM 기반 개발 자동화에 적용한다.
+
+### 선언적 목표 명시 (Phase 문서)
+
+- 각 Phase 문서(`context/phases/<phase>.md`)는 "완료 상태"를 선언적으로 기술한다.
+- "어떻게(How)"가 아닌 "무엇(What)"을 명시: 포트, 레이블, 리소스 제약, 의존 관계.
+- Developer 노드는 이 선언을 읽고 스스로 구현 경로를 결정한다.
+
+### 제약조건 = Smoke Test
+
+- Phase 문서의 제약사항은 자유 텍스트가 아니라 smoke test 스크립트로 기계 검증된다.
+- smoke test는 **수용 기준(acceptance criterion)**: 통과해야만 sub_goal 완료.
+- "문서에 명시됐지만 smoke test가 없는 제약"은 강제되지 않는다.
+
+### 결과 기반 피드백 루프
+
+- Static / Runtime Verifier는 Developer의 출력물을 검증하고 실패 원인을 구조화된 형식으로 반환한다.
+- Runtime Verifier의 LLM 진단(Phase 2) 결과는 `context/knowledge/<tech>-llm-findings.md`에 자동 기록되어 다음 시도에 주입된다.
+- 사람이 개입하지 않아도 반복 시도를 통해 수정 정확도가 높아진다.
+
+> 요약: **Phase 문서**로 목표를 선언하고, **smoke test**로 제약을 강제하며, **피드백 루프**로 점진적으로 수렴한다.
+
+---
+
 ## 1. 그래프 흐름
 
 ```
