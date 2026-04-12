@@ -23,6 +23,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from harness.config import NAMESPACE, PROJECT_ROOT
+from harness.llm import client as llm
 from harness.llm.artifacts import scan_service_files
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
@@ -270,6 +271,28 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
 
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)
+
+    # parse 실패 시 1회 retry: JSON만 요청
+    if phase2["suggestions"] and phase2["suggestions"][0].startswith("LLM response parse failed:"):
+        _console.print("  [yellow]⚠ Phase 2 parse failed — retrying with JSON-only request ...[/yellow]")
+        messages.append({
+            "role": "user",
+            "content": (
+                "Your previous response could not be parsed as JSON. "
+                "Respond with ONLY a valid JSON object — no prose, no fences, no explanation.\n"
+                'Schema: {"passed": false, "observations": [{"area": "...", "finding": "..."}], "suggestions": ["..."]}\n'
+                "Use your prior tool findings to fill in the values."
+            ),
+        })
+        retry_resp = llm.chat(messages)  # tools 없음 — JSON 추출 전용
+        retry_content = retry_resp.get("content", "")
+        phase2_retry = _parse_phase2(retry_content)
+        if not (phase2_retry["suggestions"] and phase2_retry["suggestions"][0].startswith("LLM response parse failed:")):
+            phase2 = phase2_retry
+            _console.print("  [green]✓ JSON retry succeeded[/green]")
+        else:
+            _console.print("  [red]✗ JSON retry also failed — using parse-failure result[/red]")
+
     _print_phase2(phase2)
 
     technology_name = state.get("technology_name") or service_name

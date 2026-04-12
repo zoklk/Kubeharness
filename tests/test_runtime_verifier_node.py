@@ -206,6 +206,46 @@ async def test_phase2_parse_failure_treated_as_fail():
 
 
 @pytest.mark.asyncio
+async def test_phase2_json_retry_succeeds():
+    """Phase 2 parse 실패 → retry → 성공 시 retry 결과를 사용."""
+    good_json = _phase2_json(False, suggestions=["fix the chart"])
+    call_responses = [
+        _llm_resp("Sorry, I cannot provide analysis."),  # run_tool_loop 최종 응답 (parse 실패)
+        _llm_resp(good_json),                            # retry 직접 호출 (성공)
+    ]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", side_effect=call_responses),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    assert result["verification"]["passed"] is False
+    p2 = result["verification"]["runtime_phase2"]
+    assert not any("parse failed" in s for s in p2["suggestions"])
+    assert "fix the chart" in p2["suggestions"]
+
+
+@pytest.mark.asyncio
+async def test_phase2_json_retry_also_fails():
+    """retry도 parse 실패 시 원래 parse-failure 결과를 유지."""
+    call_responses = [
+        _llm_resp("Sorry, I cannot provide analysis."),
+        _llm_resp("Still not JSON either."),
+    ]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", side_effect=call_responses),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    assert result["verification"]["passed"] is False
+    p2 = result["verification"]["runtime_phase2"]
+    assert any("parse failed" in s for s in p2["suggestions"])
+
+
+@pytest.mark.asyncio
 async def test_phase2_codeblock_json_parsed():
     """```json ... ``` 코드 블록으로 감싼 응답도 파싱 가능."""
     wrapped = "```json\n" + _phase2_json(False, suggestions=["fix it"]) + "\n```"
