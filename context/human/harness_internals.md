@@ -50,6 +50,7 @@ LLM은 다음을 **user message**로 받음:
 | Cluster Environments | `config/cluster.yaml` → Python 코드 주입 | active 환경, dev/prod domain_suffix, arch |
 | Sub-Goal Specification | `context/phases/<phase>.md` 에서 sub_goal 섹션 추출 | 목표 사양, 인터페이스, 검증 명령어 등 |
 | Existing Files | `edge-server/{helm,manifests,docker,ebpf}/<service_name>/` 스캔 | 파일 경로 목록만 주입. 내용은 `read_file` 툴로 조회 |
+| Smoke Tests | `edge-server/tests/<phase>/smoke-test-<sub_goal>.sh` | 파일 전체 내용 직접 주입. 없으면 생략. |
 | Dependency Services | sub_goal spec의 `dependency` 필드 파싱 | 의존 서비스명 목록 + kagent로 직접 조회 안내 |
 | Previous Verification Failure | state.verification | fail 체크 상세, LLM 제안 |
 | Additional Instructions | state.user_hint | 사람이 interrupt에서 입력한 지시 |
@@ -158,7 +159,7 @@ LLM 없음. 결정적 실행.
 | helm upgrade --install | `edge-server/helm/<service>/` 존재 | `--wait` 없음 (빠른 적용) |
 | kubectl apply | `edge-server/manifests/<service>/` 존재 (helm 없을 때) | |
 | kubectl wait pods | helm 경로일 때만 | **2단계**: 60s 대기 → terminal 상태 감지 → terminal이면 즉시 fail / 아니면 240s 추가 대기 |
-| smoke test | `edge-server/scripts/smoke-test-<service_name>.sh` 존재 시 | kubectl_wait 실패 시 skip |
+| smoke test | `edge-server/tests/<phase>/smoke-test-<sub_goal>.sh` 존재 시 | kubectl_wait 실패 시 skip |
 
 **values 파일**: `values.yaml` + `values-{active}.yaml` (static_verifier와 동일 로직)
 
@@ -238,7 +239,7 @@ phase 문서에 이 값을 명시하면 LLM이 values 파일에 올바른 nodeSe
 | 네임스페이스 | `gikview` |
 | Helm release name | `<service_name>-dev-v1` |
 | kubectl label selector | `app.kubernetes.io/name=<service_name>` |
-| Smoke test 경로 | `edge-server/scripts/smoke-test-<service_name>.sh` |
+| Smoke test 경로 | `edge-server/tests/<phase>/smoke-test-<sub_goal>.sh` |
 
 ---
 
@@ -249,7 +250,7 @@ phase 문서가 하네스와 어긋나는 경우 체크:
 - [ ] `service_name`이 helm/manifest/docker 경로의 `<service_name>`과 일치하는가
 - [ ] 커스텀 이미지 서비스는 `edge-server/docker/<service_name>/` 경로를 명시했는가
 - [ ] 환경별 다른 값(nodeSelector 등)은 values-dev.yaml / values-prod.yaml 분리로 설명했는가
-- [ ] smoke test 경로가 `edge-server/scripts/smoke-test-<service_name>.sh`인가
+- [ ] smoke test 경로가 `edge-server/tests/<phase>/smoke-test-<sub_goal>.sh`인가
 - [ ] dependency 필드가 `` `service_name` `` 형식(백틱)으로 작성됐는가
 - [ ] 검증 명령어가 실행 가능한 bash 명령어인가 (설명문 금지)
 - [ ] kubectl wait timeout이 `300s`인가 (helm 배포 기준)

@@ -3,7 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from harness.config import kubeconfig_path
+from harness.config import NAMESPACE, kubeconfig_path
 
 
 def _env() -> dict:
@@ -17,6 +17,8 @@ def _env() -> dict:
     kc = kubeconfig_path()
     if kc and "KUBECONFIG" not in env:
         env["KUBECONFIG"] = kc
+    # smoke test 등 bash 스크립트가 NS="${HARNESS_NAMESPACE:-gikview}" 로 읽음
+    env["HARNESS_NAMESPACE"] = NAMESPACE
     return env
 
 

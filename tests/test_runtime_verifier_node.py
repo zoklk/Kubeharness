@@ -122,7 +122,7 @@ async def test_phase1_fail_runs_phase2():
     ):
         result = await runtime_verifier_node(_state())
 
-    m_p1.assert_called_once_with(SERVICE, log_dir=str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_0/runtime"))
+    m_p1.assert_called_once_with(SERVICE, SERVICE, "test", log_dir=str(PROJECT_ROOT / "logs/raw/test/myapp/attempt_0/runtime"))
     m_tools.assert_called_once()
     m_chat.assert_called()
 

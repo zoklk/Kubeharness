@@ -39,7 +39,7 @@ kubectl wait --for=condition=Ready pod \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-step-ca.sh`
+- **경로**: `edge-server/tests/security/smoke-test-step-ca.sh`
 - **검증**:
   1.
 

@@ -12,11 +12,11 @@
 
 - **기본 배포 수단은 Helm**. 거의 모든 서비스는 `edge-server/helm/<service>/` 하위 차트로 관리
 - `edge-server/manifests/<service>/`: 단일 리소스 YAML. 예외적 경우만
-- `edge-server/scripts/smoke-test-<service>.sh`: 사람이 미리 작성
+- `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`: 사람이 미리 작성
 - `edge-server/docker/<service>/`: 커스텀 이미지 빌드 컨텍스트
 - `edge-server/ebpf/<module>/`: eBPF 소스코드 작성 위치 (빌드 및 연결은 사람이 직접)
 
-**Developer는 `edge-server/` 외부 경로 작성 절대 금지**. `harness/`, `context/`, `config/`, `tests/`, `scripts/` 등은 hands off.
+**Developer는 `edge-server/` 외부 경로 작성 절대 금지**. `harness/`, `context/`, `config/`, `edge-server/tests/`, `scripts/` 등은 hands off.
 
 ## Helm 차트 구조
 
@@ -200,7 +200,7 @@ image:
 
 ## Smoke Test
 
-- 위치: `edge-server/scripts/smoke-test-<service>.sh`
+- 위치: `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`
 - **사람이 미리 작성**. Developer/Tester가 자동 생성하지 않음
 - 없으면 Runtime Verifier가 smoke test 단계를 skip
 - exit 0이면 pass, 그 외 fail

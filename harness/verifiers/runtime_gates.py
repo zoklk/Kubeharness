@@ -1,7 +1,7 @@
 """
 런타임 게이트 함수. LLM 없음, 순수 결정적 실행.
 
-run_runtime_phase1(service_name) -> {"passed": bool, "checks": [...]}
+run_runtime_phase1(service_name, sub_goal_name, phase_name) -> {"passed": bool, "checks": [...]}
 
 배포 경로 자동 감지:
   has_helm      : edge-server/helm/<service>/  → helm upgrade --install → kubectl wait pods
@@ -9,10 +9,10 @@ run_runtime_phase1(service_name) -> {"passed": bool, "checks": [...]}
   둘 다 없음    : 즉시 fail
 
 컨벤션 (context/inject/conventions.md와 동기화):
-  namespace      : gikview
+  namespace      : <cluster.yaml namespace 필드 (기본 gikview)>
   release_name   : <service>-dev-v1
   label_selector : app.kubernetes.io/name=<service>
-  smoke_test     : edge-server/scripts/smoke-test-<service>.sh (없으면 skip)
+  smoke_test     : edge-server/tests/<phase>/<sub_goal>.sh (없으면 skip)
 
 events 조회는 Phase 2 LLM이 kagent로 직접 수행. Phase 1에서는 하지 않음.
 """
@@ -139,7 +139,7 @@ def _terminal_detail(pods_r: dict) -> str:
 
 # ── 메인 게이트 함수 ──────────────────────────────────────────────────────────
 
-def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict:
+def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, log_dir: Optional[str] = None) -> dict:
     """
     순서대로 실행. 하나 fail이면 이후 체크는 skip하고 즉시 반환.
 
@@ -160,7 +160,7 @@ def run_runtime_phase1(service_name: str, log_dir: Optional[str] = None) -> dict
     manifest_dir = str(PROJECT_ROOT / f"edge-server/manifests/{service_name}")
     rname = release_name(service_name)
     lsel = label_selector(service_name)
-    smoke_test_path = PROJECT_ROOT / f"edge-server/scripts/smoke-test-{service_name}.sh"
+    smoke_test_path = PROJECT_ROOT / f"edge-server/tests/{phase_name}/smoke-test-{sub_goal_name}.sh"
 
     has_helm = Path(chart_path).is_dir()
     has_manifests = Path(manifest_dir).is_dir()

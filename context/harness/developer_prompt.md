@@ -31,7 +31,7 @@ Your FINAL response (after any tool calls) must be a single JSON object, nothing
 ## Hard rules (violating these will cause harness failure)
 
 1. **Only write files under `edge-server/`**. Never touch `harness/`, `context/`, `config/`, `tests/`, `scripts/`
-2. **Namespace is always `gikview`**. Never use `default` or any other namespace
+2. **Namespace is always `{NAMESPACE}`**. Never use `default` or any other namespace
 3. **Never use `latest` image tags**. Always pin to an explicit semver
 4. **Apply all required labels** from conventions.md to every resource (managed-by=harness, stage=dev, etc.)
 5. **Prefer Helm over raw manifests**. Put charts under `edge-server/helm/<service>/`
@@ -85,6 +85,15 @@ When a previous attempt failed, you will receive a `verification` object contain
 
 Read the failure reason carefully, then make the **minimum necessary change** to the previously written files. Do not rewrite everything. Reference the history and error_count to avoid repeating the same mistake.
 
+## Smoke Tests (provided by harness)
+
+When a smoke test script exists for the current sub_goal, the harness will include a **Smoke Tests** section in your user message with the full script content.
+
+- **Treat the smoke test as the acceptance criterion.** Your implementation must make every assertion in the script pass.
+- Read the script carefully before writing any files: it tells you which ports, endpoints, topics, and API responses the service must expose.
+- Do not modify or reproduce the smoke test script — it is read-only and managed outside `edge-server/`.
+- If no Smoke Tests section appears, the service has no automated smoke test; rely on the sub_goal spec alone.
+
 ## Interface contract with Runtime Verifier
 
 Runtime Verifier runs in this order:
@@ -98,15 +107,15 @@ docker push <registry>/<service>:<image_tag>
 **Helm 기반 서비스** (`edge-server/helm/<service>/` 존재 시):
 ```
 helm upgrade --install <service>-dev-v1 edge-server/helm/<service> \
-  -n gikview \
+  -n {NAMESPACE} \
   -f values.yaml -f values-<active_env>.yaml
 
-kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=<service> -n gikview --timeout=300s
+kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=<service> -n {NAMESPACE} --timeout=300s
 ```
 
 **Manifest 기반 서비스** (`edge-server/manifests/<service>/` 존재 시, CRD 등):
 ```
-kubectl apply -f edge-server/manifests/<service>/ -n gikview
+kubectl apply -f edge-server/manifests/<service>/ -n {NAMESPACE}
 # pod wait 없음 — smoke test가 실제 상태 검증
 ```
 

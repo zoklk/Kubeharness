@@ -119,6 +119,7 @@ async def test_error_count_not_incremented_when_passed():
 async def test_files_written_to_disk(tmp_path, monkeypatch):
     """LLM이 반환한 edge-server/ 경로 파일이 실제로 기록된다."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
 
     files = [
         {"path": "edge-server/helm/prometheus/Chart.yaml", "content": "apiVersion: v2\nname: prometheus"},
@@ -140,6 +141,7 @@ async def test_files_written_to_disk(tmp_path, monkeypatch):
 async def test_path_prefix_guard_rejects_outside_edge_server(tmp_path, monkeypatch):
     """edge-server/ 외부 경로는 쓰지 않고 dev_artifacts에도 포함 안 됨."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
 
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "ok"},
@@ -163,6 +165,7 @@ async def test_path_prefix_guard_rejects_outside_edge_server(tmp_path, monkeypat
 async def test_all_paths_outside_prefix_writes_nothing(tmp_path, monkeypatch):
     """모든 경로가 prefix 위반이면 files=[]."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
 
     files = [{"path": "scripts/run.py", "content": "evil"}]
     with (
@@ -184,7 +187,7 @@ async def test_parse_failure_returns_empty_files():
         patch("harness.nodes.developer._load_tools", return_value=([], [])),
         patch("harness.llm.client.chat",
               return_value=_llm_resp("Sorry, I cannot help with that.")),
-        patch("harness.nodes.developer._scan_service_files", return_value=[]),
+        patch("harness.nodes.developer.scan_service_files", return_value=[]),
     ):
         result = await developer_node(_state())
 

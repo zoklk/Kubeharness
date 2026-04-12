@@ -43,7 +43,7 @@ kubectl wait --for=condition=Ready pod \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-prometheus.sh`
+- **경로**: `edge-server/tests/visibility/smoke-test-prometheus.sh`
 - **검증**:
   1.
 
@@ -77,7 +77,7 @@ kubectl wait --for=condition=Ready pod \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-grafana.sh`
+- **경로**: `edge-server/tests/visibility/smoke-test-grafana.sh`
 - **검증**:
   1.
 
@@ -109,7 +109,7 @@ kubectl rollout status daemonset/node-exporter -n gikview --timeout=300s
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-node-exporter.sh`
+- **경로**: `edge-server/tests/visibility/smoke-test-node-exporter.sh`
 - **검증**:
   1.
 
@@ -143,7 +143,7 @@ kubectl wait --for=condition=Ready pod \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-emqx-exporter.sh`
+- **경로**: `edge-server/tests/visibility/smoke-test-emqx-exporter.sh`
 - **검증**:
   1.
 
@@ -177,7 +177,7 @@ kubectl wait --for=condition=Ready pod \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-ebpf-tc-hook.sh`
+- **경로**: `edge-server/tests/visibility/smoke-test-ebpf-tc-hook.sh`
 - **검증**:
   1.
 

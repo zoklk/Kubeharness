@@ -22,7 +22,8 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from harness.config import ARTIFACT_PREFIX, PROJECT_ROOT
+from harness.config import NAMESPACE, PROJECT_ROOT
+from harness.llm.artifacts import scan_service_files
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
@@ -80,6 +81,7 @@ def _log_dir(state: HarnessState, sub: str) -> str:
 def _load_system_prompt() -> str:
     if _PROMPT_PATH.exists():
         content = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+        content = content.replace("{NAMESPACE}", NAMESPACE)
         return content if content else _DEFAULT_SYSTEM_PROMPT
     return _DEFAULT_SYSTEM_PROMPT
 
@@ -97,13 +99,7 @@ async def _load_tools() -> tuple[list, list[dict]]:
 
 def _artifact_files_listing(service_name: str) -> str:
     """Phase 2 LLM에게 서비스 아티팩트 파일 목록 제공 — 제안 시 정확한 파일 경로 참조용."""
-    all_files: list[str] = []
-    for sub in ("helm", "manifests", "docker"):
-        base = PROJECT_ROOT / f"{ARTIFACT_PREFIX}{sub}/{service_name}"
-        if base.is_dir():
-            for p in sorted(base.rglob("*")):
-                if p.is_file():
-                    all_files.append(str(p.relative_to(PROJECT_ROOT)))
+    all_files = scan_service_files(service_name, subdirs=("helm", "manifests", "docker"))
     if not all_files:
         return ""
     return "\n\n## Artifact Files\n" + "\n".join(f"- `{f}`" for f in all_files)
@@ -180,7 +176,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
 
     # ── Phase 1 (subprocess → to_thread으로 이벤트 루프 블로킹 방지) ──────────
     phase1 = await asyncio.to_thread(
-        run_runtime_phase1, service_name, log_dir=runtime_log_dir
+        run_runtime_phase1, service_name, sub_goal["name"], sub_goal["phase"], log_dir=runtime_log_dir
     )
     _print_phase1(phase1)
 

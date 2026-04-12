@@ -25,7 +25,7 @@ Your job is **root cause diagnosis**: use kagent tools to find out *why* the dep
 - `CheckServiceConnectivity`
 - `GetRelease`, `ListReleases`
 
-All scoped to namespace `gikview` unless told otherwise.
+All scoped to namespace `{NAMESPACE}` unless told otherwise.
 
 ## Output format (STRICT JSON)
 

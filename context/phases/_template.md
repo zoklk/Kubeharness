@@ -28,7 +28,7 @@
                      edge-server/manifests/<service_name>/
     - Helm release:  <service_name>
     - kubectl 셀렉터: app.kubernetes.io/name=<service_name>
-    - Smoke test:    edge-server/scripts/smoke-test-<service_name>.sh
+    - Smoke test:    edge-server/tests/<phase>/smoke-test-<sub_goal>.sh
     - Docker build:  edge-server/docker/<service_name>/   (커스텀 이미지 시)
     - eBPF 소스:     edge-server/ebpf/<service_name>/     (eBPF 모듈 시)
 
@@ -102,7 +102,7 @@ kubectl get events -n gikview \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-<service-name>.sh`
+- **경로**: `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`
 - **검증**:
   1. <테스트 단계 1>
   2. <테스트 단계 2>

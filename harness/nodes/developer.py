@@ -18,6 +18,7 @@ from pathlib import Path
 from rich.console import Console
 
 from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, all_envs, cluster_config
+from harness.llm.artifacts import scan_service_files
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
@@ -46,6 +47,7 @@ _DEFAULT_SYSTEM_PROMPT = (
 def _load_system_prompt() -> str:
     if _PROMPT_PATH.exists():
         content = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+        content = content.replace("{NAMESPACE}", NAMESPACE)
         return content if content else _DEFAULT_SYSTEM_PROMPT
     return _DEFAULT_SYSTEM_PROMPT
 
@@ -138,6 +140,7 @@ def _build_user_message(state: HarnessState, sub_goal_spec: str, service_name: s
     name = sub_goal["name"]
 
     existing_files_section = _build_existing_files_section(service_name)
+    smoke_tests_section = _build_smoke_tests_section(phase, name)
 
     active_env = cluster_config().get("_active", "dev")
     envs = all_envs()
@@ -173,6 +176,9 @@ def _build_user_message(state: HarnessState, sub_goal_spec: str, service_name: s
         ),
         f"## Sub-Goal Specification\n{sub_goal_spec}",
     ]
+
+    if smoke_tests_section:
+        parts.append(smoke_tests_section)
 
     if existing_files_section:
         parts.append(existing_files_section)
@@ -231,16 +237,23 @@ def _extract_dependencies(sub_goal_spec: str) -> list[str]:
     return re.findall(r'`([^`]+)`', value)
 
 
-def _scan_service_files(service_name: str) -> list[str]:
-    """edge-server/{helm,manifests,docker,ebpf}/<service_name>/ 하위 파일 경로 목록 반환."""
-    files: list[str] = []
-    for sub in ("helm", "manifests", "docker", "ebpf"):
-        base = PROJECT_ROOT / f"{_ALLOWED_PREFIX}{sub}/{service_name}"
-        if base.is_dir():
-            for p in sorted(base.rglob("*")):
-                if p.is_file():
-                    files.append(str(p.relative_to(PROJECT_ROOT)))
-    return files
+def _build_smoke_tests_section(phase_name: str, sub_goal_name: str) -> str:
+    """
+    edge-server/tests/<phase_name>/smoke-test-<sub_goal_name>.sh 내용을 읽어
+    'Smoke Tests' 섹션으로 반환. 파일 없으면 빈 문자열.
+    """
+    smoke_path = PROJECT_ROOT / f"{ARTIFACT_PREFIX}tests/{phase_name}/smoke-test-{sub_goal_name}.sh"
+    if not smoke_path.exists():
+        return ""
+    content = smoke_path.read_text(encoding="utf-8")
+    _console.print(f"  [dim]Smoke test found: {smoke_path.relative_to(PROJECT_ROOT)}[/dim]")
+    return (
+        "## Smoke Tests\n"
+        "Runtime Verifier가 배포 후 실행할 smoke test입니다. "
+        "이 테스트를 통과하도록 구현하세요.\n\n"
+        f"### `smoke-test-{sub_goal_name}.sh`\n"
+        f"```bash\n{content.rstrip()}\n```"
+    )
 
 
 def _build_existing_files_section(service_name: str) -> str:
@@ -249,7 +262,7 @@ def _build_existing_files_section(service_name: str) -> str:
     파일 내용은 read_file 툴로 조회 — context 크기 절감.
     파일이 하나도 없으면 빈 문자열 반환.
     """
-    all_files = _scan_service_files(service_name)
+    all_files = scan_service_files(service_name)
 
     if not all_files:
         _console.print(f"  [dim]No existing files for '{service_name}' — fresh start[/dim]")
@@ -384,7 +397,7 @@ async def developer_node(state: HarnessState) -> dict:
 
     # 쓰기 완료 후 서비스 디렉토리 전체 스캔 (기존 + 새로 쓴 파일 모두 포함)
     # 디렉토리가 아직 없는 완전 신규 서비스면 written_files 폴백
-    artifact_files = _scan_service_files(service_name) or written_files
+    artifact_files = scan_service_files(service_name) or written_files
 
     return {
         "current_sub_goal": {**sub_goal, "stage": "dev", "service_name": service_name},

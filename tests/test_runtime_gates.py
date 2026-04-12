@@ -15,6 +15,8 @@ from harness.verifiers.runtime_gates import (
 )
 
 SERVICE = "myapp"
+SUB_GOAL = "myapp"
+PHASE = "testing"
 
 
 # ── 공통 mock 반환값 헬퍼 ─────────────────────────────────────────────────────
@@ -47,7 +49,7 @@ def test_all_pass_no_smoke(tmp_path):
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()) as m_wait,
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -70,23 +72,23 @@ def test_all_pass_no_smoke(tmp_path):
 
 def test_all_pass_with_smoke(tmp_path, monkeypatch):
     """smoke test 스크립트가 존재하고 통과하면 passed=True."""
-    smoke_dir = tmp_path / "edge-server" / "scripts"
+    smoke_dir = tmp_path / "edge-server" / "tests" / PHASE
     smoke_dir.mkdir(parents=True)
-    (smoke_dir / f"smoke-test-{SERVICE}.sh").write_text("exit 0")
+    (smoke_dir / f"smoke-test-{SUB_GOAL}.sh").write_text("exit 0")
 
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
         patch("harness.tools.shell.run", return_value=_ok("smoke ok")) as m_smoke,
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["smoke_test"] == "pass"
     args = m_smoke.call_args[0][0]
     assert args[0] == "bash"
-    assert f"smoke-test-{SERVICE}.sh" in args[1]
+    assert f"smoke-test-{SUB_GOAL}.sh" in args[1]
 
 
 # ── 배포 아티팩트 없음 ────────────────────────────────────────────────────────
@@ -96,7 +98,7 @@ def test_no_artifacts_fail(tmp_path, monkeypatch):
     import shutil
     shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
 
-    result = run_runtime_phase1(SERVICE)
+    result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     assert result["checks"][0]["name"] == "deploy"
@@ -108,7 +110,7 @@ def test_no_artifacts_fail(tmp_path, monkeypatch):
 def test_helm_fail_skips_rest():
     """helm install 일반 실패(immutable 아님) 시 나머지 skip, passed=False."""
     with patch("harness.tools.helm.upgrade_install", return_value=_fail("connection timed out")):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -130,7 +132,7 @@ def test_helm_immutable_uninstall_then_reinstall_success():
         patch("harness.tools.helm.uninstall", return_value=_ok()) as m_uninstall,
         patch("harness.tools.kubectl.wait", return_value=_ok()),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -146,7 +148,7 @@ def test_helm_immutable_uninstall_fails():
         patch("harness.tools.helm.upgrade_install", return_value=_fail("immutable")),
         patch("harness.tools.helm.uninstall", return_value=_fail("release not found")) as m_uninstall,
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -167,7 +169,7 @@ def test_helm_immutable_reinstall_fails():
         patch("harness.tools.helm.uninstall", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -185,7 +187,7 @@ def test_kubectl_wait_fail_non_terminal():
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -197,16 +199,16 @@ def test_kubectl_wait_fail_non_terminal():
 # ── smoke_test fail ───────────────────────────────────────────────────────────
 
 def test_smoke_fail(tmp_path, monkeypatch):
-    smoke_dir = tmp_path / "edge-server" / "scripts"
+    smoke_dir = tmp_path / "edge-server" / "tests" / PHASE
     smoke_dir.mkdir(parents=True)
-    (smoke_dir / f"smoke-test-{SERVICE}.sh").write_text("exit 1")
+    (smoke_dir / f"smoke-test-{SUB_GOAL}.sh").write_text("exit 1")
 
     with (
         patch("harness.tools.helm.upgrade_install", return_value=_ok()),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
         patch("harness.tools.shell.run", return_value=_fail("connection refused")),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     smoke_check = next(c for c in result["checks"] if c["name"] == "smoke_test")
@@ -226,7 +228,7 @@ def test_values_files_included_when_present(tmp_path, monkeypatch):
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()),
     ):
-        run_runtime_phase1(SERVICE)
+        run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     _, _, _, vf = m_helm.call_args[0]
     assert any("values.yaml" in f for f in vf)
@@ -243,7 +245,7 @@ def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
         patch("harness.tools.helm.upgrade_install", return_value=_ok()) as m_helm,
         patch("harness.tools.kubectl.wait", return_value=_ok()),
     ):
-        run_runtime_phase1(SERVICE)
+        run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     _, _, _, vf = m_helm.call_args[0]
     assert len(vf) == 1
@@ -262,7 +264,7 @@ def test_manifest_deploy_pass(tmp_path, monkeypatch):
     with (
         patch("harness.tools.kubectl.apply", return_value=_ok()) as m_apply,
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -282,7 +284,7 @@ def test_manifest_deploy_fail(tmp_path, monkeypatch):
     (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
 
     with patch("harness.tools.kubectl.apply", return_value=_fail("CRD not found")):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -299,7 +301,7 @@ def test_log_dir_saved(tmp_path):
         patch("harness.tools.helm.upgrade_install", return_value=_ok("helm output")),
         patch("harness.tools.kubectl.wait", return_value=_ok()),
     ):
-        result = run_runtime_phase1(SERVICE, log_dir=log_dir)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE, log_dir=log_dir)
 
     helm_check = next(c for c in result["checks"] if c["name"] == "helm_install")
     assert helm_check["log_path"] is not None
@@ -354,7 +356,7 @@ def test_kubectl_wait_terminal_early_exit():
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_terminal("CrashLoopBackOff")),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -372,7 +374,7 @@ def test_kubectl_wait_pending_then_240s_pass():
         patch("harness.tools.kubectl.wait", side_effect=[_fail("timed out"), _ok()]) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
@@ -387,7 +389,7 @@ def test_kubectl_wait_pending_then_240s_fail():
         patch("harness.tools.kubectl.wait", return_value=_fail("timed out")) as m_wait,
         patch("harness.tools.kubectl.get_pods", return_value=_pods_json_pending()),
     ):
-        result = run_runtime_phase1(SERVICE)
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
     assert result["passed"] is False
     statuses = {c["name"]: c["status"] for c in result["checks"]}

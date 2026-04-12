@@ -46,7 +46,7 @@ kubectl exec -n gikview deploy/influxdb -- \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-influxdb.sh`
+- **경로**: `edge-server/tests/storage/smoke-test-influxdb.sh`
 - **검증**:
   1. port-forward 경유 `/health` — HTTP 200, `"pass"` 포함
   2. line protocol write (`/api/v2/write`) — HTTP 204

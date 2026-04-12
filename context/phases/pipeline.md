@@ -47,7 +47,7 @@ kubectl get lease edge-gateway-leader -n gikview \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-edge-gateway.sh`
+- **경로**: `edge-server/tests/pipeline/smoke-test-edge-gateway.sh`
 - **검증**:
   1. 3 pod Ready 확인
   2. Lease holder 존재 확인
@@ -88,7 +88,7 @@ kubectl get crd esp32devices.gikview.io
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-esp32device-operator.sh`
+- **경로**: `edge-server/tests/pipeline/smoke-test-esp32device-operator.sh`
 - **검증**:
   1. CRD 등록 확인
   2. 테스트 CR 생성 후 operator가 status 갱신 확인

@@ -79,7 +79,7 @@ kubectl get events -n gikview \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-emqx.sh`
+- **경로**: `edge-server/tests/messaging/smoke-test-emqx.sh`
 - **검증**:
   1. `emqx ctl cluster status` — running_nodes 3개 확인
   2. port-forward 경유 `mosquitto_pub/sub` — 1883 pub/sub 왕복 성공
@@ -126,7 +126,7 @@ kubectl get events -n gikview \
 ```
 
 ### 4. Smoke Test
-- **경로**: `edge-server/scripts/smoke-test-cilium-l2.sh`
+- **경로**: `edge-server/tests/messaging/smoke-test-cilium-l2-vip.sh`
 - **검증**:
   1. `kubectl get svc emqx-lb` — `EXTERNAL-IP` 비어있지 않음
   2. `nc -zv <VIP> 1883` — exit 0
