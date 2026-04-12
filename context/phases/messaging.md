@@ -4,13 +4,6 @@
 - **목적**: ESP32 디바이스가 MQTT over TLS(8883)로 EMQX 3-Pod HA 클러스터에 연결되며, Cilium L2 Announcements VIP가 단일 캠퍼스 진입점을 제공하는 상태
 - **관련 기술**: EMQX 5.8.6 (StatefulSet), Cilium 1.19.2 (L2 Announcements, Beta)
 
-## 이미지 버전 결정 근거
-
-> **채택: `emqx/emqx:5.8.6`**
->
-> v5.9.0부터 BSL 1.1로 라이선스 변경. 1노드 초과 클러스터에 라이선스 키 필수.
-> 5.8.6(Apache 2.0, 클러스터 무제한) 고정. EOL 도래 시 6.x 마이그레이션 또는 라이선스 발급으로 대응.
-
 ## Sub_goals 목록
 | # | ID | service_name | 요약 |
 |---|---|---|---|
@@ -40,23 +33,7 @@
 - **리소스**:
   - CPU: `200m` / `500m`
   - Memory: `384Mi` / `512Mi` (개발 alpha 클러스터)
-- **EMQX DNS 디스커버리** — domain_suffix는 환경마다 다르므로 values 파일을 분리:
-  ```yaml
-  # values.yaml (공통)
-  emqxConfig:
-    EMQX_CLUSTER__DISCOVERY_STRATEGY: "dns"
-    EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"
-
-  # values-dev.yaml (domain_suffix: alpha.nexus.local)
-  emqxConfig:
-    EMQX_CLUSTER__DNS__NAME: "emqx-headless.gikview.svc.alpha.nexus.local"
-    EMQX_NODE__NAME: "emqx@$(POD_NAME).emqx-headless.gikview.svc.alpha.nexus.local"
-
-  # values-prod.yaml (domain_suffix: cluster.local)
-  emqxConfig:
-    EMQX_CLUSTER__DNS__NAME: "emqx-headless.gikview.svc.cluster.local"
-    EMQX_NODE__NAME: "emqx@$(POD_NAME).emqx-headless.gikview.svc.cluster.local"
-  ```
+- **DNS 디스커버리**: `EMQX_CLUSTER__DISCOVERY_STRATEGY: dns`, `EMQX_CLUSTER__DNS__RECORD_TYPE: srv` — domain_suffix는 환경별 values 파일 분리 (see: `context/knowledge/emqx.md`)
 - **Anti-affinity**: `requiredDuringSchedulingIgnoredDuringExecution`, key `app.kubernetes.io/name: emqx`
 
 ### 3. 검증 명령어
@@ -86,13 +63,13 @@ kubectl get events -n gikview \
   3. port-forward 경유 Dashboard API `/api/v5/nodes` — 3 노드 `running`
 
 ### 5. 제약사항
-- `EMQX_NODE__NAME`을 Pod FQDN 형식으로 고정하지 않으면 재시작마다 mnesia 데이터 불일치 발생.
 - anti-affinity를 `required`로 설정해 3 Pod가 반드시 다른 노드에 배치되어야 함.
 
 ---
 
 ## Sub_goal: `cilium-l2-vip`
 - **service_name**: `cilium-l2`
+- **technology**: `cilium`
 
 ### 1. 목표 사양
 - **기능**: Cilium L2 Announcements를 통해 학내망에서 ARP 광고되는 단일 VIP(LoadBalancer IP)를 EMQX 앞단에 구성. 노드 장애 시 Cilium이 자동으로 다른 노드에서 ARP 광고 재개(lease 기반 VIP 마이그레이션).

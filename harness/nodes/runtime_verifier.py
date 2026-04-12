@@ -160,6 +160,55 @@ def _parse_phase2(content: str) -> dict:
     }
 
 
+def _save_llm_findings(technology_name: str, phase2: dict, sub_goal_name: str, phase_name: str) -> None:
+    """
+    Phase 2 LLM 진단 결과를 context/knowledge/<technology_name>-llm-findings.md 에 append.
+    observations + suggestions 모두 비어 있으면 skip.
+    suggestions가 모두 이미 파일에 존재하면 중복으로 skip.
+    """
+    observations: list[dict] = phase2.get("observations", [])
+    suggestions: list[str] = phase2.get("suggestions", [])
+
+    if not observations and not suggestions:
+        return
+
+    knowledge_dir = PROJECT_ROOT / "context" / "knowledge"
+    findings_path = knowledge_dir / f"{technology_name}-llm-findings.md"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+
+    existing_text = findings_path.read_text(encoding="utf-8") if findings_path.exists() else ""
+
+    # 중복 체크: suggestions가 모두 이미 파일에 존재하면 skip
+    if suggestions and all(sug in existing_text for sug in suggestions):
+        _console.print(
+            f"  [dim]Findings skipped (duplicate) → context/knowledge/{technology_name}-llm-findings.md[/dim]"
+        )
+        return
+
+    from datetime import date
+    date_str = date.today().isoformat()
+
+    obs_lines = "\n".join(f"- [{o.get('area', '')}] {o.get('finding', '')}" for o in observations)
+    sug_lines = "\n".join(f"- {s}" for s in suggestions)
+
+    entry = (
+        f"## {date_str} | phase: {phase_name} | sub_goal: {sub_goal_name}\n"
+        f"### Observations\n{obs_lines or '- (none)'}\n"
+        f"### Suggestions\n{sug_lines or '- (none)'}\n"
+        "---\n"
+    )
+
+    with findings_path.open("a", encoding="utf-8") as f:
+        f.write(entry)
+
+    n_obs = len(observations)
+    n_sug = len(suggestions)
+    _console.print(
+        f"  [dim]Findings saved → context/knowledge/{technology_name}-llm-findings.md "
+        f"(+{n_obs} obs, +{n_sug} sug)[/dim]"
+    )
+
+
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
 
 async def runtime_verifier_node(state: HarnessState) -> dict:
@@ -222,6 +271,9 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)
     _print_phase2(phase2)
+
+    technology_name = state.get("technology_name") or service_name
+    _save_llm_findings(technology_name, phase2, sub_goal["name"], sub_goal.get("phase", ""))
 
     return {
         "current_sub_goal": {**sub_goal, "stage": "runtime_verify"},

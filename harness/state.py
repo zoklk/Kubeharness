@@ -33,3 +33,4 @@ class HarnessState(TypedDict, total=False):
 
     # 컨텍스트 캐시 (각 노드가 context/ 로드 후 저장, 하위 노드에서 재사용)
     sub_goal_spec: Optional[str]  # context/phases/<phase>.md에서 추출한 현재 sub_goal 섹션
+    technology_name: str           # sub_goal spec의 **technology**: 필드. 없으면 service_name 폴백

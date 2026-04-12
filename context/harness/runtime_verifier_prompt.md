@@ -24,8 +24,26 @@ Your job is **root cause diagnosis**: use kagent tools to find out *why* the dep
 - `GetEvents`, `GetPodLogs`
 - `CheckServiceConnectivity`
 - `GetRelease`, `ListReleases`
+- `ExecuteCommand` — pod 내부 bash 실행 (예: `nslookup`, `curl`, `emqx ctl cluster status`)
+- `CiliumStatusAndVersion` — Cilium CNI 상태 및 버전 확인
+- `CiliumShowDNSNames` — Cilium DNS 이름 조회 (DNS discovery 서비스 진단용)
 
 All scoped to namespace `{NAMESPACE}` unless told otherwise.
+
+### Pod 내부 진단 (`ExecuteCommand`)
+
+DNS/클러스터 discovery 문제 진단 시 pod 내부에서 직접 실행:
+
+```
+# DNS 해석 확인
+ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["nslookup", "emqx-headless.{NAMESPACE}.svc.cluster.local"])
+
+# EMQX 클러스터 상태
+ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["emqx", "ctl", "cluster", "status"])
+
+# 포트 연결 확인
+ExecuteCommand(pod="emqx-0", namespace="{NAMESPACE}", command=["curl", "-s", "http://localhost:18083/api/v5/nodes"])
+```
 
 ## Output format (STRICT JSON)
 
