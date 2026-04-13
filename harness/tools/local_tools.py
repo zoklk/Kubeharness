@@ -32,7 +32,7 @@ def read_file_tool_dict() -> dict:
         "description": (
             "Read a file from the repository. "
             "Use this to inspect existing Helm chart files, values files, or templates "
-            "before writing your output. Path must start with 'edge-server/'."
+            f"before writing your output. Path must start with '{ARTIFACT_PREFIX}'."
         ),
         "parameters": {
             "type": "object",
@@ -41,7 +41,7 @@ def read_file_tool_dict() -> dict:
                     "type": "string",
                     "description": (
                         "File path relative to project root. "
-                        "Example: 'edge-server/helm/emqx/values.yaml'"
+                        f"Example: '{ARTIFACT_PREFIX}helm/emqx/values.yaml'"
                     ),
                 }
             },

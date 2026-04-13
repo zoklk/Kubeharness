@@ -74,3 +74,39 @@ def all_envs() -> dict[str, dict]:
 def kubeconfig_path() -> str | None:
     """명시적 kubeconfig 경로. 비어있으면 None 반환."""
     return _kubeconfig
+
+
+def build_cluster_env_section(include_authoring_hint: bool = True) -> str:
+    """Cluster Environments 마크다운 섹션 반환.
+
+    include_authoring_hint=True: developer용 (values-{env}.yaml 작성 요구사항 포함)
+    include_authoring_hint=False: verifier용 (도메인/환경 정보만)
+    """
+    active_env = cluster_config().get("_active", "dev")
+    envs = all_envs()
+    env_rows = "\n".join(
+        f"| `{n}` | `{c['domain_suffix']}` | `{c['arch']}` |"
+        for n, c in envs.items()
+    )
+    env_detail = "\n".join(
+        f"### `{n}` (`values-{n}.yaml`)\n"
+        f"- domain_suffix: `{c['domain_suffix']}`\n"
+        f"- arch: `linux/{c['arch']}`\n"
+        f"- DNS example: `<service>-headless.{NAMESPACE}.svc.{c['domain_suffix']}`"
+        for n, c in envs.items()
+    )
+    authoring = (
+        f"\n**You MUST write {', '.join(f'`values-{e}.yaml`' for e in envs)} for EVERY service.**\n"
+        "Each file overrides environment-specific values (domain, arch, resources).\n"
+        if include_authoring_hint else ""
+    )
+    return (
+        f"## Cluster Environments\n"
+        f"**Active for testing**: `{active_env}` "
+        f"(Static/Runtime Verifier will use `values-{active_env}.yaml`)\n"
+        f"{authoring}\n"
+        f"| env | domain_suffix | arch |\n"
+        f"|-----|--------------|------|\n"
+        f"{env_rows}\n\n"
+        f"{env_detail}"
+    )

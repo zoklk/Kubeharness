@@ -27,9 +27,11 @@ class HarnessState(TypedDict, total=False):
 
     # 이력
     error_count: int
+    runtime_retry_count: int  # runtime_verifier 자가 루프 재시도 횟수 (error_count와 독립)
 
     # 사람 추가 지시 (developer interrupt에서 입력, developer_node가 user message에 포함 후 소거)
     user_hint: Optional[str]
 
     # 컨텍스트 캐시 (각 노드가 context/ 로드 후 저장, 하위 노드에서 재사용)
     sub_goal_spec: Optional[str]  # context/phases/<phase>.md에서 추출한 현재 sub_goal 섹션
+    technology_name: str           # sub_goal spec의 **technology**: 필드. 없으면 service_name 폴백

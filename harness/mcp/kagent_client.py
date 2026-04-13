@@ -9,12 +9,13 @@ langchain-mcp-adapters를 사용해 kagent-tools MCP 서버에서
 누락되어 서버가 요청을 거부한다.
 """
 
-from pathlib import Path
 from typing import Any
 import yaml
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-_CONFIG_PATH = Path(__file__).parent.parent.parent / "config" / "kagent.yaml"
+from harness.config import PROJECT_ROOT
+
+_CONFIG_PATH = PROJECT_ROOT / "config" / "kagent.yaml"
 
 
 def _load_config() -> dict:
@@ -45,6 +46,25 @@ async def get_kagent_tools(role: str, url_override: str | None = None) -> list:
     })
     all_tools = await client.get_tools()
     return [t for t in all_tools if t.name in allowed_names]
+
+
+async def load_node_tools(group_name: str, node_name: str, console=None) -> tuple[list, list[dict]]:
+    """
+    kagent tools 로드 공용 함수. 실패 시 경고 후 빈 리스트로 graceful degradation.
+
+    Args:
+        group_name: kagent.yaml의 tool 그룹명 (e.g. "developer_tools")
+        node_name: 로그 출력용 노드명 (e.g. "developer")
+        console: Rich Console 인스턴스 (없으면 새로 생성)
+    """
+    from rich.console import Console
+    _con = console or Console()
+    try:
+        tool_objs = await get_kagent_tools(group_name)
+        return tool_objs, tools_as_chat_dicts(tool_objs)
+    except Exception as e:
+        _con.print(f"  [yellow]⚠ kagent tools unavailable ({node_name}): {e}[/yellow]")
+        return [], []
 
 
 def tools_as_chat_dicts(tools: list) -> list[dict]:

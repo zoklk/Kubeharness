@@ -23,6 +23,16 @@ SERVICE = "prometheus"
 PHASE = "monitoring"
 
 
+# ── 격리 픽스처 ────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_project_root(tmp_path, monkeypatch):
+    """developer_node / _write_files 가 실제 프로젝트 디렉토리에 파일을 쓰지 않도록
+    PROJECT_ROOT 를 tmp_path 로 격리한다. 모든 테스트에 자동 적용."""
+    monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
+
+
 # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────
 
 def _state(service: str = SERVICE, phase: str = PHASE,
@@ -200,7 +210,7 @@ async def test_codeblock_json_parsed(tmp_path, monkeypatch):
     """```json...``` 코드 블록 응답도 정상 파싱."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
 
-    files = [{"path": "edge-server/manifests/app/deploy.yaml", "content": "kind: Deployment"}]
+    files = [{"path": "edge-server/helm/app/Chart.yaml", "content": "apiVersion: v2"}]
     wrapped = "```json\n" + json.dumps({"files": files, "notes": "wrapped"}) + "\n```"
     with (
         patch("harness.nodes.developer._load_tools", return_value=([], [])),
@@ -297,7 +307,7 @@ async def test_tools_load_inner_exception_returns_empty():
     async def _raise(*args, **kwargs):
         raise Exception("no cluster")
 
-    with patch("harness.nodes.developer.get_kagent_tools", new=_raise):
+    with patch("harness.mcp.kagent_client.get_kagent_tools", new=_raise):
         objs, dicts = await _load_tools()
 
     assert objs == []
@@ -519,6 +529,7 @@ def test_extract_subgoal_level1_heading():
 def test_write_files_success(tmp_path, monkeypatch):
     """정상 쓰기: 성공 경로 리스트 반환, error=None."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "apiVersion: v2"},
         {"path": "edge-server/helm/app/values.yaml", "content": "replicas: 1"},
@@ -535,6 +546,7 @@ def test_write_files_success(tmp_path, monkeypatch):
 def test_write_files_empty_content_skipped(tmp_path, monkeypatch):
     """빈 content 파일은 pre-validation에서 skip."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "apiVersion: v2"},
         {"path": "edge-server/helm/app/empty.yaml", "content": ""},  # 빈 content
@@ -548,6 +560,7 @@ def test_write_files_empty_content_skipped(tmp_path, monkeypatch):
 def test_write_files_prefix_violation_skipped(tmp_path, monkeypatch):
     """prefix 위반 경로는 pre-validation에서 skip."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "ok"},
         {"path": "harness/state.py", "content": "malicious"},
@@ -561,6 +574,7 @@ def test_write_files_prefix_violation_skipped(tmp_path, monkeypatch):
 def test_write_files_oserror_stops_loop_and_returns_error(tmp_path, monkeypatch):
     """OSError 발생 시 루프 중단, 부분 성공 목록 + 에러 메시지 반환."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "ok"},
         {"path": "edge-server/helm/app/values.yaml", "content": "fail_here"},
@@ -590,6 +604,7 @@ def test_write_files_oserror_stops_loop_and_returns_error(tmp_path, monkeypatch)
 def test_write_files_all_invalid_returns_empty(tmp_path, monkeypatch):
     """모든 파일이 prefix 위반 또는 빈 content이면 ([], None) 반환."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "scripts/run.py", "content": "evil"},
         {"path": "edge-server/ok.yaml", "content": ""},
@@ -637,7 +652,8 @@ def test_verification_summary_static_fail():
     assert "helm_lint" not in s  # pass는 생략
 
 
-def test_verification_summary_runtime_phase1_fail():
+def test_verification_summary_only_static_checks():
+    """runtime_phase1/phase2는 요약에 포함되지 않는다 (runtime 실패는 자가 루프로 처리됨)."""
     v = {
         "passed": False,
         "stage": "runtime",
@@ -646,20 +662,8 @@ def test_verification_summary_runtime_phase1_fail():
             "passed": False,
             "checks": [
                 {"name": "helm_install", "status": "fail", "detail": "immutable field"},
-                {"name": "kubectl_wait", "status": "skip", "detail": "prior step failed"},
             ],
         },
-    }
-    s = _verification_summary(v)
-    assert "[FAIL] runtime/helm_install: immutable field" in s
-    assert "kubectl_wait" not in s  # skip은 생략
-
-
-def test_verification_summary_runtime_phase2_suggestions():
-    v = {
-        "passed": False,
-        "stage": "runtime",
-        "checks": [],
         "runtime_phase2": {
             "passed": False,
             "observations": [{"area": "logs", "finding": "OOM detected"}],
@@ -667,8 +671,10 @@ def test_verification_summary_runtime_phase2_suggestions():
         },
     }
     s = _verification_summary(v)
-    assert "[OBS] logs: OOM detected" in s
-    assert "[SUGGESTION] Increase memory limit" in s
+    # runtime details NOT included — developer never sees runtime failures
+    assert "runtime/helm_install" not in s
+    assert "OOM detected" not in s
+    assert "Increase memory limit" not in s
 
 
 # ── _extract_service_name 직접 테스트 ────────────────────────────────────────
@@ -707,12 +713,12 @@ def test_extract_service_name_fallback_on_empty_spec():
 def test_build_user_message_contains_target(tmp_path, monkeypatch):
     """user message에 phase, sub_goal name, spec 포함."""
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
-    (tmp_path / "inject").mkdir()
-    (tmp_path / "inject" / "conventions.md").write_text("conv", encoding="utf-8")
-    (tmp_path / "inject" / "tech_stack.md").write_text("tech", encoding="utf-8")
+    (tmp_path / "base").mkdir()
+    (tmp_path / "base" / "conventions.md").write_text("conv", encoding="utf-8")
+    (tmp_path / "base" / "tech_stack.md").write_text("tech", encoding="utf-8")
 
     sub_goal_spec = "Spec here."
-    msg = _build_user_message(_state(), sub_goal_spec, SERVICE)
+    msg = _build_user_message(_state(), sub_goal_spec, SERVICE, SERVICE)
     assert f"Phase: {PHASE}" in msg
     assert f"Sub-Goal: {SERVICE}" in msg
     assert "Spec here." in msg
@@ -724,16 +730,28 @@ def test_build_user_message_missing_context_shows_placeholder(tmp_path, monkeypa
     """context 파일 없으면 placeholder 포함."""
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
 
-    msg = _build_user_message(_state(), "", SERVICE)
+    msg = _build_user_message(_state(), "", SERVICE, SERVICE)
     assert "[conventions.md not found]" in msg
     assert "[tech_stack.md not found]" in msg
 
 
 def test_build_user_message_cluster_environments_present(tmp_path, monkeypatch):
     """user message에 Cluster Environments 섹션과 active 환경이 포함된다."""
+    from unittest.mock import patch as _patch
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
 
-    msg = _build_user_message(_state(), "", SERVICE)
+    fake_envs = {
+        "dev": {"domain_suffix": "alpha.local", "arch": "amd64", "kubeconfig": ""},
+        "prod": {"domain_suffix": "cluster.local", "arch": "arm64", "kubeconfig": ""},
+    }
+    fake_active = {"domain_suffix": "alpha.local", "arch": "amd64", "_active": "dev"}
+
+    with (
+        _patch("harness.config.all_envs", return_value=fake_envs),
+        _patch("harness.config.cluster_config", return_value=fake_active),
+    ):
+        msg = _build_user_message(_state(), "", SERVICE, SERVICE)
+
     assert "Cluster Environments" in msg
     assert "Active for testing" in msg
     # dev, prod 두 환경 모두 표시
@@ -743,9 +761,20 @@ def test_build_user_message_cluster_environments_present(tmp_path, monkeypatch):
 
 def test_build_user_message_generic_dns_example(tmp_path, monkeypatch):
     """DNS 예시가 서비스명 하드코딩 없이 <service>-headless 형식이다."""
+    from unittest.mock import patch as _patch
     monkeypatch.setattr("harness.nodes.developer._CONTEXT_DIR", tmp_path)
 
-    msg = _build_user_message(_state(), "", SERVICE)
+    fake_envs = {
+        "dev": {"domain_suffix": "alpha.local", "arch": "amd64", "kubeconfig": ""},
+    }
+    fake_active = {"domain_suffix": "alpha.local", "arch": "amd64", "_active": "dev"}
+
+    with (
+        _patch("harness.config.all_envs", return_value=fake_envs),
+        _patch("harness.config.cluster_config", return_value=fake_active),
+    ):
+        msg = _build_user_message(_state(), "", SERVICE, SERVICE)
+
     # emqx-headless처럼 특정 서비스가 하드코딩되면 안 됨
     assert "emqx-headless" not in msg
     assert "<service>-headless" in msg
@@ -763,10 +792,10 @@ def test_build_user_message_domain_suffix_in_env_section(tmp_path, monkeypatch):
     fake_active = {"domain_suffix": "test.local", "arch": "amd64", "_active": "dev"}
 
     with (
-        _patch("harness.nodes.developer.all_envs", return_value=fake_envs),
-        _patch("harness.nodes.developer.cluster_config", return_value=fake_active),
+        _patch("harness.config.all_envs", return_value=fake_envs),
+        _patch("harness.config.cluster_config", return_value=fake_active),
     ):
-        msg = _build_user_message(_state(), "", SERVICE)
+        msg = _build_user_message(_state(), "", SERVICE, SERVICE)
 
     assert "test.local" in msg
     assert "cluster.local" in msg

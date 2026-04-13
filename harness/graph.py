@@ -1,17 +1,17 @@
 """
 LangGraph 그래프 조립.
 
-노드: developer → static_verifier → (조건) → runtime_verifier → (조건) → END
+노드: developer → static_verifier → (조건) → runtime_verifier → (자가 루프 or END)
 인터럽트:
-  - interrupt_before=["developer"]  : LLM에 넘길 컨텍스트 확인, 추가 지시 가능
+  - interrupt_before=["developer"]       : LLM에 넘길 컨텍스트 확인, 추가 지시 가능
   - interrupt_after=["runtime_verifier"] : 결과 확인 후 계속/중단 결정
 
 라우팅:
   static_verifier  → pass: runtime_verifier / fail: developer
-  runtime_verifier → pass: END           / fail: developer
+  runtime_verifier → pass: END / fail: runtime_verifier (자가 루프)
 
-error_count가 max_retries에 도달하면 developer 진입 전에도 interrupt를
-걸어 사람이 강제 개입할 수 있게 한다 (그래프 외부, run.py에서 처리).
+runtime_verifier 자가 루프는 runtime_retry_count를 증가시키며 재시도.
+max_runtime_retries 초과 시 run.py에서 강제 사람 개입 요구.
 """
 
 from langgraph.graph import StateGraph, END
@@ -37,7 +37,7 @@ def _route_after_static(state: HarnessState) -> str:
 
 def _route_after_runtime(state: HarnessState) -> str:
     v = state.get("verification", {}) or {}
-    return END if v.get("passed") else NODE_DEVELOPER
+    return END if v.get("passed") else NODE_RUNTIME_VERIFIER
 
 
 # ── 그래프 빌더 ───────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ def build_graph() -> "CompiledGraph":  # type: ignore[name-defined]
     g.add_conditional_edges(
         NODE_RUNTIME_VERIFIER,
         _route_after_runtime,
-        {END: END, NODE_DEVELOPER: NODE_DEVELOPER},
+        {END: END, NODE_RUNTIME_VERIFIER: NODE_RUNTIME_VERIFIER},
     )
 
     return g.compile(

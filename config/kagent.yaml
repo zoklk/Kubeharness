@@ -23,3 +23,6 @@ runtime_verifier_tools:
   - k8s_rollout
   - helm_get_release
   - helm_list_releases
+  - k8s_execute_command
+  - cilium_status_and_version
+  - cilium_show_dns_names

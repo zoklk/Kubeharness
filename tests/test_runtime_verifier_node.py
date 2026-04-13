@@ -4,10 +4,12 @@ harness/nodes/runtime_verifier.py 단위 테스트
 동작 원칙:
   Phase 1 pass → LLM 호출 없음, verification.passed=True, runtime_phase2 없음
   Phase 1 fail → Phase 2 LLM 진단 실행, verification.passed=False (항상)
+               → phase2.files 있으면 파일 쓰기, runtime_retry_count 증가
 """
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -24,13 +26,16 @@ SERVICE = "myapp"
 
 # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────
 
-def _state(service: str = SERVICE, error_count: int = 0) -> dict:
+def _state(service: str = SERVICE, error_count: int = 0, runtime_retry_count: int = 0,
+           user_hint: str = "") -> dict:
     return {
         "current_phase": "test",
         "current_sub_goal": {"name": service, "phase": "test", "stage": "static_verify"},
         "verification": {"passed": True, "stage": "static", "checks": [], "log_dir": "logs/raw/test/myapp/attempt_0/"},
         "history": [],
         "error_count": error_count,
+        "runtime_retry_count": runtime_retry_count,
+        "user_hint": user_hint,
     }
 
 
@@ -62,12 +67,15 @@ def _llm_resp(content: str, tool_calls=None):
     return {"content": content, "tool_calls": tool_calls, "raw": None}
 
 
-def _phase2_json(passed: bool, observations=None, suggestions=None) -> str:
-    return json.dumps({
+def _phase2_json(passed: bool, observations=None, suggestions=None, files=None) -> str:
+    data = {
         "passed": passed,
         "observations": observations or [],
         "suggestions": suggestions or [],
-    })
+    }
+    if files is not None:
+        data["files"] = files
+    return json.dumps(data)
 
 
 # ── Phase 1 pass: LLM 호출 없이 즉시 통과 ────────────────────────────────────
@@ -167,7 +175,7 @@ async def test_phase1_fail_phase2_always_false():
 
 @pytest.mark.asyncio
 async def test_phase1_fail_suggestions_forwarded():
-    """Phase 2 진단 suggestions가 Developer에게 전달되도록 verification에 포함된다."""
+    """Phase 2 진단 suggestions가 verification에 포함된다."""
     suggestions = ["Increase memory limit to 512Mi", "Check EMQX_NODE__NAME env var"]
     with (
         patch("harness.nodes.runtime_verifier.run_runtime_phase1",
@@ -187,6 +195,146 @@ async def test_phase1_fail_suggestions_forwarded():
     assert any(o["finding"] == "OOMKilled" for o in p2["observations"])
 
 
+# ── runtime_retry_count 증가 ──────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_runtime_retry_count_incremented_on_fail():
+    """Phase 1 fail 시 runtime_retry_count가 1 증가한다."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
+        result = await runtime_verifier_node(_state(runtime_retry_count=0))
+
+    assert result["runtime_retry_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_retry_count_accumulates():
+    """runtime_retry_count가 누적된다."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
+        result = await runtime_verifier_node(_state(runtime_retry_count=2))
+
+    assert result["runtime_retry_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_runtime_retry_count_not_in_pass_result():
+    """Phase 1 pass 시 runtime_retry_count는 반환 state에 없다."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_pass()),
+        patch("harness.llm.client.chat"),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    assert "runtime_retry_count" not in result
+
+
+# ── user_hint 소비 ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_user_hint_consumed_on_fail():
+    """Phase 1 fail 시 user_hint가 빈 문자열로 소거된다."""
+    captured: list[list[dict]] = []
+
+    def _capture(messages, **kwargs):
+        captured.append(messages)
+        return _llm_resp(_phase2_json(False))
+
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", side_effect=_capture),
+    ):
+        result = await runtime_verifier_node(_state(user_hint="increase memory to 1Gi"))
+
+    assert result["user_hint"] == ""
+    # user_hint가 user message에 포함됐는지 확인
+    user_msg = captured[0][1]["content"]
+    assert "increase memory to 1Gi" in user_msg
+
+
+@pytest.mark.asyncio
+async def test_user_hint_injected_into_message():
+    """user_hint가 Phase 2 user message에 포함된다."""
+    captured: list[list[dict]] = []
+
+    def _capture(messages, **kwargs):
+        captured.append(messages)
+        return _llm_resp(_phase2_json(False))
+
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat", side_effect=_capture),
+    ):
+        await runtime_verifier_node(_state(user_hint="check the DNS config"))
+
+    user_msg = captured[0][1]["content"]
+    assert "Additional Instructions from Operator" in user_msg
+    assert "check the DNS config" in user_msg
+
+
+# ── Phase 2 파일 쓰기 ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_phase2_files_written(tmp_path, monkeypatch):
+    """Phase 2 응답에 files 포함 시 파일이 실제로 기록된다."""
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.nodes.runtime_verifier._shared_write_files.__module__", None, raising=False)
+
+    files = [{"path": "edge-server/helm/myapp/values.yaml", "content": "replicas: 2\n"}]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat",
+              return_value=_llm_resp(_phase2_json(False, files=files))),
+        patch("harness.nodes.runtime_verifier._write_files", return_value=(["edge-server/helm/myapp/values.yaml"], None)) as m_write,
+    ):
+        result = await runtime_verifier_node(_state())
+
+    m_write.assert_called_once_with(files)
+    # files should NOT be in state (excluded from phase2_for_state)
+    assert "files" not in result["verification"]["runtime_phase2"]
+
+
+@pytest.mark.asyncio
+async def test_phase2_no_files_no_write():
+    """Phase 2 응답에 files 없으면 _write_files 호출 안 함."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat",
+              return_value=_llm_resp(_phase2_json(False))),
+        patch("harness.nodes.runtime_verifier._write_files") as m_write,
+    ):
+        await runtime_verifier_node(_state())
+
+    m_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_phase2_files_not_stored_in_state():
+    """Phase 2 files 내용은 state에 저장되지 않는다 (bloat 방지)."""
+    files = [{"path": "edge-server/helm/myapp/values.yaml", "content": "x: 1"}]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.llm.client.chat",
+              return_value=_llm_resp(_phase2_json(False, files=files))),
+        patch("harness.nodes.runtime_verifier._write_files", return_value=([], None)),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    p2 = result["verification"]["runtime_phase2"]
+    assert "files" not in p2
+
+
 # ── Phase 2 JSON 파싱 실패 ────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -203,6 +351,7 @@ async def test_phase2_parse_failure_treated_as_fail():
     p2 = result["verification"]["runtime_phase2"]
     assert p2["passed"] is False
     assert any("parse failed" in s for s in p2["suggestions"])
+
 
 
 @pytest.mark.asyncio
@@ -248,7 +397,7 @@ async def test_tools_load_inner_exception_returns_empty():
     async def _raise(*args, **kwargs):
         raise Exception("no cluster")
 
-    with patch("harness.nodes.runtime_verifier.get_kagent_tools", new=_raise):
+    with patch("harness.mcp.kagent_client.get_kagent_tools", new=_raise):
         objs, dicts = await _load_tools()
     assert objs == []
     assert dicts == []
@@ -366,7 +515,7 @@ async def test_state_fields_phase1_pass():
 
 @pytest.mark.asyncio
 async def test_state_fields_phase1_fail():
-    """Phase 1 fail 시 state 필드: runtime_phase2 포함."""
+    """Phase 1 fail 시 state 필드: runtime_phase2 포함, runtime_retry_count 증가."""
     with (
         patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
         patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
@@ -378,6 +527,8 @@ async def test_state_fields_phase1_fail():
     assert "runtime_phase1" in result["runtime_verification"]
     assert "runtime_phase2" in result["runtime_verification"]
     assert result["current_sub_goal"]["stage"] == "runtime_verify"
+    assert result["runtime_retry_count"] == 1
+    assert result["user_hint"] == ""
 
 
 @pytest.mark.asyncio
@@ -413,6 +564,22 @@ def test_parse_phase2_valid():
     assert r["passed"] is True
     assert r["observations"][0]["area"] == "pod"
     assert r["suggestions"] == ["good"]
+    assert r["files"] == []
+
+
+def test_parse_phase2_with_files():
+    """files 필드가 파싱 결과에 포함된다."""
+    files = [{"path": "edge-server/helm/emqx/values.yaml", "content": "x: 1"}]
+    content = _phase2_json(False, suggestions=["fix it"], files=files)
+    r = _parse_phase2(content)
+    assert r["files"] == files
+
+
+def test_parse_phase2_no_files_returns_empty_list():
+    """files 필드 없는 응답은 빈 리스트를 반환한다."""
+    content = _phase2_json(False, suggestions=["check something"])
+    r = _parse_phase2(content)
+    assert r["files"] == []
 
 
 def test_parse_phase2_codeblock():
@@ -425,6 +592,7 @@ def test_parse_phase2_invalid():
     r = _parse_phase2("not json at all")
     assert r["passed"] is False
     assert any("parse failed" in s for s in r["suggestions"])
+    assert r["files"] == []
 
 
 def test_parse_phase2_preamble_and_suffix():
@@ -458,3 +626,67 @@ def test_phase1_summary_fail_shows_detail():
     assert "[FAIL] helm_install" in summary
     assert "immutable field error on ConfigMap" in summary
     assert "[SKIP] kubectl_wait" in summary
+
+
+# ── Phase 2 knowledge 주입 ────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_phase2_knowledge_injected_in_message():
+    """technology_name의 knowledge가 Phase 2 user message에 포함된다."""
+    captured: list[list[dict]] = []
+
+    def _capture_chat(messages, **kwargs):
+        captured.append(messages)
+        return _llm_resp(_phase2_json(False))
+
+    state = _state()
+    state["technology_name"] = "emqx"
+    state["sub_goal_spec"] = "- **dependency**: 없음"
+
+    knowledge = [
+        ("## Technology Knowledge: emqx", "DNS suffix: alpha.nexus.local for dev"),
+    ]
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.nodes.runtime_verifier.read_knowledge", return_value=knowledge),
+        patch("harness.llm.client.chat", side_effect=_capture_chat),
+    ):
+        await runtime_verifier_node(state)
+
+    user_msg = captured[0][1]["content"]
+    assert "Technology Knowledge: emqx" in user_msg
+    assert "DNS suffix: alpha.nexus.local for dev" in user_msg
+
+
+@pytest.mark.asyncio
+async def test_phase2_no_knowledge_message_structure_unchanged():
+    """knowledge 없으면 기존 메시지 구조 그대로 — Phase 2 동작에 영향 없음."""
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.nodes.runtime_verifier.read_knowledge", return_value=[]),
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
+        result = await runtime_verifier_node(_state())
+
+    assert result["verification"]["passed"] is False
+    assert "runtime_phase2" in result["verification"]
+
+
+@pytest.mark.asyncio
+async def test_phase2_knowledge_includes_deps():
+    """sub_goal_spec의 dependency가 read_knowledge에 전달된다."""
+    state = _state()
+    state["technology_name"] = "myapp"
+    state["sub_goal_spec"] = "- **dependency**: `step-ca`, `emqx`"
+
+    with (
+        patch("harness.nodes.runtime_verifier.run_runtime_phase1", return_value=_phase1_fail()),
+        patch("harness.nodes.runtime_verifier._load_tools", return_value=([], [])),
+        patch("harness.nodes.runtime_verifier.read_knowledge", return_value=[]) as m_rk,
+        patch("harness.llm.client.chat", return_value=_llm_resp(_phase2_json(False))),
+    ):
+        await runtime_verifier_node(state)
+
+    m_rk.assert_called_once_with("myapp", ["step-ca", "emqx"])

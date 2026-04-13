@@ -11,8 +11,9 @@
        - 빈 입력이면 그대로 진행, 'abort'이면 중단
     2. runtime_verifier 직후 interrupt
        - 검증 결과(passed/fail, checks) 출력
-       - pass: 'continue' 또는 Enter → END
-       - fail: 계속 재시도할지('continue'), 중단할지('abort') 선택
+       - pass: Enter → END
+       - fail: 자동 재시도 (선택적 힌트 입력 가능), 'abort'이면 중단
+       - runtime_retry_count >= --max-runtime-retries: 강제 사람 개입 필요
 
 error_count가 --max-retries에 도달하면 developer 직전 interrupt에서
 강제 중단 또는 사람 개입을 요구한다.
@@ -64,6 +65,11 @@ def _parse_args() -> argparse.Namespace:
         "--max-retries", type=int, default=3, dest="max_retries",
         metavar="N",
         help="Developer 최대 재시도 횟수. 초과 시 강제 interrupt (기본값: 3)",
+    )
+    parser.add_argument(
+        "--max-runtime-retries", type=int, default=3, dest="max_runtime_retries",
+        metavar="N",
+        help="Runtime Verifier 자가 루프 최대 횟수. 초과 시 강제 interrupt (기본값: 3)",
     )
     parser.add_argument(
         "--skip-interrupt", action="store_true", dest="skip_interrupt",
@@ -174,15 +180,21 @@ def _handle_developer_interrupt(
     return True, hint
 
 
-def _handle_runtime_interrupt(state: HarnessState, skip: bool) -> bool:
+def _handle_runtime_interrupt(
+    state: HarnessState,
+    max_runtime_retries: int,
+    skip: bool,
+) -> tuple[bool, str]:
     """
     runtime_verifier 직후 interrupt 처리.
 
     Returns:
-        should_continue — False이면 run.py가 중단.
+        (should_continue, user_hint)
+        should_continue=False이면 run.py가 중단.
     """
     v = state.get("verification") or {}
     passed = v.get("passed", False)
+    runtime_retry_count = state.get("runtime_retry_count", 0)
 
     if passed:
         console.print(Panel(
@@ -190,23 +202,53 @@ def _handle_runtime_interrupt(state: HarnessState, skip: bool) -> bool:
             border_style="green",
         ))
         if skip:
-            return True
+            return True, ""
         _prompt("Enter를 누르면 종료합니다: ")
-        return True
+        return True, ""
 
     # fail
+    at_limit = runtime_retry_count >= max_runtime_retries
+    failure_source = v.get("failure_source", "implementation")
+    is_smoke_test_bug = failure_source == "smoke_test"
+
     console.print(Panel(
-        "[red bold]검증 실패[/red bold] — Developer로 돌아갈 수 있습니다.",
+        f"[red bold]검증 실패[/red bold]  (runtime_retry={runtime_retry_count})",
         border_style="red",
     ))
 
+    # smoke_test 버그로 진단된 경우 — --skip-interrupt여도 강제 개입
+    if is_smoke_test_bug:
+        console.print(
+            "[red bold]⚠ Phase 2 진단: smoke test 자체의 버그[/red bold]\n"
+            "[yellow]자동 재시도를 중단합니다. smoke test를 수동으로 수정하세요.[/yellow]"
+        )
+        for sug in (v.get("runtime_phase2") or {}).get("suggestions", []):
+            console.print(f"  [yellow]→ {escape(sug)}[/yellow]")
+        choice = _prompt(
+            "smoke test 수정 후 재시도하려면 'continue', 중단하려면 Enter/'abort': "
+        ).strip()
+        if choice.lower() == "continue":
+            return True, ""
+        return False, ""
+
+    if at_limit:
+        console.print(
+            f"[red bold]Runtime Verifier 최대 재시도({max_runtime_retries}회) 도달. 사람 개입 필요.[/red bold]"
+        )
+        # skip 모드여도 limit에선 반드시 확인
+        hint_or_abort = _prompt("계속하려면 힌트 입력 또는 Enter, 중단하려면 'abort': ").strip()
+        if hint_or_abort.lower() == "abort":
+            return False, ""
+        return True, hint_or_abort
+
     if skip:
         console.print("[dim]--skip-interrupt: 자동 재시도[/dim]")
-        return True
+        return True, ""
 
-    choice = _prompt("재시도하려면 'continue', 중단하려면 'abort': ").strip().lower()
-    # 비대화형(non-TTY)이면 _prompt가 "" 반환 → developer interrupt와 동일하게 continue 처리
-    return choice != "abort"
+    hint = _prompt("재시도하려면 Enter (또는 힌트 입력), 중단하려면 'abort': ").strip()
+    if hint.lower() == "abort":
+        return False, ""
+    return True, hint
 
 
 def _prompt(msg: str) -> str:
@@ -263,26 +305,28 @@ async def main() -> None:
         # ── interrupt 지점 판정 ───────────────────────────────────────────────
         snapshot = await graph.aget_state(config)
 
-        # metadata.writes: 직전에 실행된 노드 → interrupt 종류 구분에 사용
-        # interrupt_before["developer"]      → writes에 runtime_verifier 없음
-        # interrupt_after["runtime_verifier"] → writes에 "runtime_verifier" 있음
-        last_writes: dict = (snapshot.metadata or {}).get("writes", {})
-        after_runtime = NODE_RUNTIME_VERIFIER in last_writes
+        # interrupt_after["runtime_verifier"] fail → next=("runtime_verifier",) (자가 루프)
+        # interrupt_after["runtime_verifier"] pass → next=()  → elif not snapshot.next 처리
+        # interrupt_before["developer"]        → next=("developer",)
+        after_runtime = bool(snapshot.next) and snapshot.next[0] == NODE_RUNTIME_VERIFIER
 
         if after_runtime:
-            # ── interrupt_after["runtime_verifier"] ───────────────────────────
+            # ── interrupt_after["runtime_verifier"] fail (자가 루프) ───────────
             # snapshot.next: 라우팅 결과
-            #   pass → ()     (END 예정, 한 번 더 stream해서 마무리)
-            #   fail → ("developer",)
-            should_continue = _handle_runtime_interrupt(
-                snapshot.values, skip=args.skip_interrupt
+            #   pass → ()                    (END 예정, 한 번 더 stream해서 마무리)
+            #   fail → ("runtime_verifier",) (자가 루프)
+            should_continue, hint = _handle_runtime_interrupt(
+                snapshot.values,
+                max_runtime_retries=args.max_runtime_retries,
+                skip=args.skip_interrupt,
             )
             if not should_continue:
                 console.print("[red]중단합니다.[/red]")
                 sys.exit(1)
+            user_hint = hint
             # pass/fail 모두 resume → 다음 루프에서 graph.stream(None) 처리
             # pass → END: resume 후 그래프 완료, 다음 루프에서 break
-            # fail → resume 후 interrupt_before["developer"] 발생, 다음 루프에서 처리
+            # fail → resume 후 runtime_verifier 자가 루프 (interrupt_after 재발생)
 
         elif not snapshot.next:
             # ── 진짜 그래프 종료 (END) ────────────────────────────────────────

@@ -21,7 +21,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: step-ca`
 - **dependency**: 없음
@@ -29,16 +29,7 @@
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=step-ca \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/security/smoke-test-step-ca.sh`
 - **검증**:
   1.

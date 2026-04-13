@@ -28,15 +28,28 @@ def _fail(stderr="error", stdout=""):
     return {"stdout": stdout, "stderr": stderr, "exit_code": 1, "command": ""}
 
 
-# ── autouse: 기본 helm 디렉토리 생성 ─────────────────────────────────────────
+# ── autouse: 기본 helm 디렉토리 생성 + helm.uninstall 기본 mock ──────────────
 #
 # 대부분의 테스트가 helm path를 전제하므로 PROJECT_ROOT를 tmp_path로 교체하고
 # edge-server/helm/<SERVICE>/ 디렉토리를 자동 생성한다.
-# manifest-path 테스트는 별도로 manifest_dir을 생성하고 helm_dir을 제거한다.
+# helm.uninstall은 기본적으로 "release not found" (exit_code=1)로 mock하여
+# 모든 테스트에서 "fresh install" 시나리오를 기본값으로 동작시킨다.
+
+_WORKLOAD_YAML = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n"
+
 
 @pytest.fixture(autouse=True)
 def _default_helm_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(
+        "harness.tools.helm.uninstall",
+        lambda *a, **kw: _fail("Error: release: not found"),
+    )
+    # helm.template은 기본적으로 workload YAML 반환 → 기존 테스트 kubectl_wait 동작 유지
+    monkeypatch.setattr(
+        "harness.tools.helm.template",
+        lambda *a, **kw: _ok(_WORKLOAD_YAML),
+    )
     (tmp_path / "edge-server" / "helm" / SERVICE).mkdir(parents=True, exist_ok=True)
     return tmp_path
 
@@ -53,6 +66,7 @@ def test_all_pass_no_smoke(tmp_path):
 
     assert result["passed"] is True
     statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert "helm_uninstall" not in statuses  # release not found → 체크 없음
     assert statuses["helm_install"] == "pass"
     assert statuses["kubectl_wait"] == "pass"
     assert statuses["smoke_test"] == "skip"
@@ -105,10 +119,61 @@ def test_no_artifacts_fail(tmp_path, monkeypatch):
     assert result["checks"][0]["status"] == "fail"
 
 
+# ── 항상 uninstall 후 install ─────────────────────────────────────────────────
+
+def test_always_uninstall_success_before_install():
+    """uninstall 성공 → helm_uninstall 체크 추가 후 install 진행."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok("deployed")) as m_helm,
+        patch("harness.tools.helm.uninstall", return_value=_ok()) as m_uninstall,
+        patch("harness.tools.kubectl.wait", return_value=_ok()),
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["helm_uninstall"] == "pass"
+    assert statuses["helm_install"] == "pass"
+    m_helm.assert_called_once()     # install 1회만
+    m_uninstall.assert_called_once()
+
+
+def test_fresh_install_release_not_found_no_check():
+    """release not found(exit_code=1) → helm_uninstall 체크 없이 install 진행 (정상)."""
+    # autouse fixture가 helm.uninstall을 "release: not found" (exit_code=1)로 mock
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", return_value=_ok()),
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert "helm_uninstall" not in statuses
+    assert statuses["helm_install"] == "pass"
+
+
+def test_uninstall_success_then_install_fail():
+    """uninstall 성공 → install 실패 → passed=False, 이후 skip."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_fail("CrashLoopBackOff")),
+        patch("harness.tools.helm.uninstall", return_value=_ok()),
+        patch("harness.tools.kubectl.wait", return_value=_ok()),
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is False
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["helm_uninstall"] == "pass"
+    assert statuses["helm_install"] == "fail"
+    assert statuses["kubectl_wait"] == "skip"
+    assert statuses["smoke_test"] == "skip"
+
+
 # ── helm_install fail ─────────────────────────────────────────────────────────
 
 def test_helm_fail_skips_rest():
-    """helm install 일반 실패(immutable 아님) 시 나머지 skip, passed=False."""
+    """helm install 실패 시 나머지 skip, passed=False."""
     with patch("harness.tools.helm.upgrade_install", return_value=_fail("connection timed out")):
         result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
 
@@ -119,63 +184,6 @@ def test_helm_fail_skips_rest():
     assert statuses["smoke_test"] == "skip"
     helm_check = next(c for c in result["checks"] if c["name"] == "helm_install")
     assert "connection timed out" in helm_check["detail"]
-
-
-def test_helm_immutable_uninstall_then_reinstall_success():
-    """immutable 에러 → uninstall 성공 → 재설치 성공 → passed=True."""
-    install_responses = [
-        _fail("StatefulSet.apps field is immutable"),
-        _ok("deployed"),
-    ]
-    with (
-        patch("harness.tools.helm.upgrade_install", side_effect=install_responses) as m_helm,
-        patch("harness.tools.helm.uninstall", return_value=_ok()) as m_uninstall,
-        patch("harness.tools.kubectl.wait", return_value=_ok()),
-    ):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is True
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["helm_uninstall_immutable"] == "pass"
-    assert statuses["helm_install"] == "pass"
-    assert m_helm.call_count == 2
-    m_uninstall.assert_called_once()
-
-
-def test_helm_immutable_uninstall_fails():
-    """immutable 에러 → uninstall 실패 → passed=False, 이후 skip."""
-    with (
-        patch("harness.tools.helm.upgrade_install", return_value=_fail("immutable")),
-        patch("harness.tools.helm.uninstall", return_value=_fail("release not found")) as m_uninstall,
-    ):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is False
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["helm_uninstall_immutable"] == "fail"
-    assert statuses["helm_install"] == "skip"
-    assert statuses["kubectl_wait"] == "skip"
-    m_uninstall.assert_called_once()
-
-
-def test_helm_immutable_reinstall_fails():
-    """immutable 에러 → uninstall 성공 → 재설치 실패 → passed=False."""
-    install_responses = [
-        _fail("immutable field detected"),
-        _fail("CrashLoopBackOff"),
-    ]
-    with (
-        patch("harness.tools.helm.upgrade_install", side_effect=install_responses),
-        patch("harness.tools.helm.uninstall", return_value=_ok()),
-        patch("harness.tools.kubectl.wait", return_value=_ok()),
-    ):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is False
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["helm_uninstall_immutable"] == "pass"
-    assert statuses["helm_install"] == "fail"
-    assert statuses["kubectl_wait"] == "skip"
 
 
 # ── kubectl_wait fail ─────────────────────────────────────────────────────────
@@ -251,45 +259,6 @@ def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
     assert len(vf) == 1
     assert "values.yaml" in vf[0]
     assert not any("values-dev" in f for f in vf)
-
-
-# ── manifest-only 경로 ────────────────────────────────────────────────────────
-
-def test_manifest_deploy_pass(tmp_path, monkeypatch):
-    """manifest dir 존재, kubectl apply 성공 → passed=True, pod wait 없음."""
-    import shutil
-    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
-    (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
-
-    with (
-        patch("harness.tools.kubectl.apply", return_value=_ok()) as m_apply,
-    ):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is True
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["kubectl_apply"] == "pass"
-    assert "kubectl_wait" not in statuses   # pod wait 없음
-    assert statuses["smoke_test"] == "skip"
-    m_apply.assert_called_once_with(
-        str(tmp_path / "edge-server" / "manifests" / SERVICE),
-        "gikview",
-    )
-
-
-def test_manifest_deploy_fail(tmp_path, monkeypatch):
-    """kubectl apply 실패 → kubectl_apply=fail, 이후 skip."""
-    import shutil
-    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
-    (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
-
-    with patch("harness.tools.kubectl.apply", return_value=_fail("CRD not found")):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is False
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["kubectl_apply"] == "fail"
-    assert statuses["smoke_test"] == "skip"
 
 
 # ── log_dir 저장 확인 ─────────────────────────────────────────────────────────
@@ -395,3 +364,37 @@ def test_kubectl_wait_pending_then_240s_fail():
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_wait"] == "fail"
     assert m_wait.call_count == 2  # 60s + 240s
+
+
+# ── CRD-only chart (no workload resources) ───────────────────────────────────
+
+def test_helm_crd_only_skips_kubectl_wait(tmp_path):
+    """CRD-only chart (no Deployment/StatefulSet/DaemonSet) → kubectl_wait skip, phase1 passes."""
+    crd_yaml = "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: test\n"
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.helm.template", return_value=_ok(crd_yaml)),
+        patch("harness.tools.kubectl.wait") as m_wait,
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "skip"
+    assert "CRD-only" in next(c["detail"] for c in result["checks"] if c["name"] == "kubectl_wait")
+    m_wait.assert_not_called()
+
+
+def test_helm_template_fail_falls_back_to_wait(tmp_path):
+    """helm template 실패 시 safe default(chart_has_workloads=True) → kubectl wait 수행."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.helm.template", return_value=_fail("helm error")),
+        patch("harness.tools.kubectl.wait", return_value=_ok()) as m_wait,
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "pass"
+    m_wait.assert_called_once()  # fallback: treated as workload chart

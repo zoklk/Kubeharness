@@ -15,8 +15,13 @@
   · 하네스는 ## Sub_goal: <id> 헤딩부터 다음 ## 헤딩 직전까지를 sub_goal
     섹션으로 읽습니다 (_extract_subgoal_section).
 
-─── B. service_name 필드 (필수) ──────────────────────────────────────────────
+─── B. service_name / technology 필드 ────────────────────────────────────────
   형식: - **service_name**: <값>   ← sub_goal 헤딩 바로 다음 첫 번째 줄
+  형식: - **technology**: <값>     ← service_name 다음 줄 (service_name과 다를 경우 필수)
+
+  · service_name과 기술명이 다를 수 있음. 예: service=cilium-l2, tech=cilium.
+  · **technology** 필드가 없으면 service_name을 technology_name으로 사용.
+  · technology_name은 context/knowledge/<tech>.md 조회 키로 사용됨.
 
   · 1 sub_goal = 1 service_name 규칙:
     하나의 sub_goal은 정확히 하나의 서비스만 생성하거나 수정합니다.
@@ -25,26 +30,19 @@
 
   · 하네스가 service_name으로 결정하는 경로/이름:
     - 배포 경로:     edge-server/helm/<service_name>/
-                     edge-server/manifests/<service_name>/
     - Helm release:  <service_name>
     - kubectl 셀렉터: app.kubernetes.io/name=<service_name>
     - Smoke test:    edge-server/tests/<phase>/smoke-test-<sub_goal>.sh
     - Docker build:  edge-server/docker/<service_name>/   (커스텀 이미지 시)
     - eBPF 소스:     edge-server/ebpf/<service_name>/     (eBPF 모듈 시)
 
-─── C. 검증 명령어 — 실행 가능한 명령어로 작성 ───────────────────────────────
-  금지: "Pod가 Ready 상태여야 한다"  (사람이 읽는 설명)
-  필수: kubectl wait ... (실행 가능한 명령어 + 기대 결과)
-
-  · exit code 0, 출력에 포함되어야 할 문자열, HTTP 응답 코드 등을 명시합니다.
-  · 각 check는 # [check] <name> 주석으로 이름을 붙입니다.
-    Verifier 노드가 이 이름을 체크 결과 식별자로 사용합니다.
-
-─── D. 금지 항목 ─────────────────────────────────────────────────────────────
+─── C. 금지 항목 ─────────────────────────────────────────────────────────────
   · "권장", "예시로", "검토 필요" 등 모호한 표현 금지
   · 반드시 지켜야 하는 제약이 아닌 항목 기재 금지
   · 하나의 sub_goal 섹션에 두 개 이상의 service_name 금지
-  · 섹션 번호와 이름 변경 금지 (파서가 이름 기반으로 섹션을 찾습니다)
+  · 섹션 번호와 이름 변경 금지
+  · 기술 내부 동작 설명, 설정 YAML 예시, 이미지/버전 결정 근거, 기술 일반 제약은
+    phase 문서 금지 → context/knowledge/<tech>.md 에 작성할 것
 
 ════════════════════════════════════════════════════════════════════════════════
 -->
@@ -64,15 +62,16 @@
 
 ## Sub_goal: `<sub-goal-id>`
 - **service_name**: `<service-name>`
+- **technology**: `<기술명>`  <!-- service_name과 다를 경우만 명시. 예: cilium-l2 서비스 → technology: cilium -->
 
 ### 1. 목표 사양
 - **기능**: <무엇을 구현/변경하는가 — 1~3문장>
 - **기술 스택**: <컴포넌트 이름 + 버전, Helm chart 버전 (repo URL 포함)>
-- **배포 경로**: `edge-server/helm/<service-name>/` 또는 `edge-server/manifests/<service-name>/`
+- **배포 경로**: `edge-server/helm/<service-name>/`
 - **이미지**: `Docker Hub 공개 (<image>:<tag>)` 또는 `커스텀 빌드 (ghcr.io/<org>/<service-name>:<tag>)`
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
   - `<port-name>: <number>` — <용도>
 - **Labels**: `app.kubernetes.io/name: <service-name>`
@@ -82,33 +81,12 @@
   - CPU: `<request>` / `<limit>`
   - Memory: `<request>` / `<limit>`
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=<service-name> \
-  -n gikview --timeout=300s
-# 기대: exit 0
-
-# [check] no_warning_events
-kubectl get events -n gikview \
-  --field-selector involvedObject.name=<service-name>,type=Warning \
-  --sort-by='.lastTimestamp'
-# 기대: 최근 5분 내 출력 없음
-
-# [check] <service-specific-name>
-<실제 실행 가능한 명령어>
-# 기대: <출력에 포함되어야 할 문자열 또는 exit code>
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`
-- **검증**:
-  1. <테스트 단계 1>
-  2. <테스트 단계 2>
 
-### 5. 제약사항
-- <반드시 지켜야 할 하드 제약. 없으면 이 섹션 전체 생략>
+### 4. 제약사항
+<!-- 이 환경/이 배포에 특화된 하드 제약만 기재. 기술 일반 제약(기술 자체 특성)은 context/knowledge/<tech>.md에 작성할 것. -->
+- <반드시 지켜야 할 환경 특화 하드 제약. 없으면 이 섹션 전체 생략>
 
 ---
 

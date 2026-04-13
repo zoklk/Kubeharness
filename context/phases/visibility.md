@@ -25,7 +25,7 @@
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: prometheus`
 - **dependency**: 없음
@@ -33,16 +33,7 @@
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=prometheus \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-prometheus.sh`
 - **검증**:
   1.
@@ -59,7 +50,7 @@ kubectl wait --for=condition=Ready pod \
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: grafana`
 - **dependency**: `prometheus`
@@ -67,16 +58,7 @@ kubectl wait --for=condition=Ready pod \
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=grafana \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-grafana.sh`
 - **검증**:
   1.
@@ -93,7 +75,7 @@ kubectl wait --for=condition=Ready pod \
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: node-exporter`
 - **dependency**: `prometheus`
@@ -101,14 +83,7 @@ kubectl wait --for=condition=Ready pod \
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] daemonset_ready
-kubectl rollout status daemonset/node-exporter -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-node-exporter.sh`
 - **검증**:
   1.
@@ -125,7 +100,7 @@ kubectl rollout status daemonset/node-exporter -n gikview --timeout=300s
 - **이미지**: Docker Hub 공개 ()
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: emqx-exporter`
 - **dependency**: `emqx`, `prometheus`
@@ -133,16 +108,7 @@ kubectl rollout status daemonset/node-exporter -n gikview --timeout=300s
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=emqx-exporter \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-emqx-exporter.sh`
 - **검증**:
   1.
@@ -159,7 +125,7 @@ kubectl wait --for=condition=Ready pod \
 - **이미지**: 커스텀 빌드 (`ghcr.io/<org>/ebpf-tc-hook:<tag>`)
 
 ### 2. 인터페이스
-- **Namespace**: `gikview`
+- **Namespace**: `{NAMESPACE}`
 - **Port**:
 - **Labels**: `app.kubernetes.io/name: ebpf-tc-hook`
 - **dependency**: `emqx`, `prometheus`
@@ -167,16 +133,7 @@ kubectl wait --for=condition=Ready pod \
   - CPU:
   - Memory:
 
-### 3. 검증 명령어
-```bash
-# [check] pod_ready
-kubectl wait --for=condition=Ready pod \
-  -l app.kubernetes.io/name=ebpf-tc-hook \
-  -n gikview --timeout=300s
-# 기대: exit 0
-```
-
-### 4. Smoke Test
+### 3. Smoke Test
 - **경로**: `edge-server/tests/visibility/smoke-test-ebpf-tc-hook.sh`
 - **검증**:
   1.
