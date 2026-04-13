@@ -10,8 +10,7 @@
 
 ## 파일 경로 (Developer가 쓸 수 있는 경로)
 
-- **기본 배포 수단은 Helm**. 거의 모든 서비스는 `edge-server/helm/<service>/` 하위 차트로 관리
-- `edge-server/manifests/<service>/`: 단일 리소스 YAML. 예외적 경우만
+- **배포 수단은 Helm**. 모든 서비스는 `edge-server/helm/<service>/` 하위 차트로 관리
 - `edge-server/tests/<phase>/smoke-test-<sub-goal>.sh`: 사람이 미리 작성
 - `edge-server/docker/<service>/`: 커스텀 이미지 빌드 컨텍스트
 - `edge-server/ebpf/<module>/`: eBPF 소스코드 작성 위치 (빌드 및 연결은 사람이 직접)

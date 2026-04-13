@@ -33,12 +33,6 @@ HELM_FILES = [
     f"edge-server/helm/{SERVICE}/templates/deployment.yaml",
 ]
 
-MANIFEST_FILES = [
-    f"edge-server/manifests/{SERVICE}/deployment.yaml",
-    f"edge-server/manifests/{SERVICE}/service.yaml",
-]
-
-
 # ── helm chart 경로 ───────────────────────────────────────────────────────────
 
 HELM_CHECKS = [
@@ -115,53 +109,6 @@ def test_helm_chart_path_passed_to_checks(tmp_path, monkeypatch):
     assert m_hd.call_args[0][0] == expected_chart
     assert m_hd.call_args[0][1] == expected_release
     assert m_hd.call_args[0][2] == "gikview"
-
-
-# ── manifest 경로 ─────────────────────────────────────────────────────────────
-
-MANIFEST_CHECKS = [
-    "check_path_prefix",
-    "check_yamllint",
-    "check_kubeconform",
-    "check_trivy_config",
-    "check_gitleaks",
-    "check_kubectl_dry_run_server",
-]
-
-def test_manifest_all_pass(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-
-    with patch.multiple("harness.verifiers.static",
-                        check_path_prefix=lambda *a, **kw: _pass("path_prefix"),
-                        check_yamllint=lambda *a, **kw: _pass("yamllint"),
-                        check_kubeconform=lambda *a, **kw: _pass("kubeconform"),
-                        check_trivy_config=lambda *a, **kw: _pass("trivy_config"),
-                        check_gitleaks=lambda *a, **kw: _pass("gitleaks"),
-                        check_kubectl_dry_run_server=lambda *a, **kw: _pass("kubectl_dry_run_server")):
-        result = static_verifier_node(_state(MANIFEST_FILES))
-
-    assert result["verification"]["passed"] is True
-    assert len(result["verification"]["checks"]) == 6
-
-
-def test_manifest_dir_passed_to_checks(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-
-    with (
-        patch("harness.verifiers.static.check_path_prefix", return_value=_pass("pp")),
-        patch("harness.verifiers.static.check_yamllint", return_value=_pass("yl")) as m_yl,
-        patch("harness.verifiers.static.check_kubeconform", return_value=_pass("kc")) as m_kc,
-        patch("harness.verifiers.static.check_trivy_config", return_value=_pass("tc")) as m_tc,
-        patch("harness.verifiers.static.check_gitleaks", return_value=_pass("gl")) as m_gl,
-        patch("harness.verifiers.static.check_kubectl_dry_run_server", return_value=_pass("kd")) as m_kd,
-    ):
-        static_verifier_node(_state(MANIFEST_FILES))
-
-    expected_dir = str(PROJECT_ROOT / f"edge-server/manifests/{SERVICE}")
-    assert m_yl.call_args[0][0] == expected_dir
-    assert m_kc.call_args[0][0] == expected_dir
-    assert m_kd.call_args[0][0] == expected_dir
-    assert m_kd.call_args[0][1] == "gikview"
 
 
 # ── path prefix 위반 ──────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@ Static Verifier 노드. LLM 없음, 순수 결정적.
 
 처리 순서:
   1. path_prefix 검사 (edge-server/ 이외 경로 차단)
-  2. dev_artifacts에서 helm chart / manifest 디렉토리 식별
+  2. dev_artifacts에서 helm chart 식별
   3. 해당 유형에 맞는 정적 체크 실행 (각 체크는 독립 실행)
   4. state 업데이트: static_verification, verification, current_sub_goal.stage
 """
@@ -21,21 +21,12 @@ def _chart_path(service_name: str) -> str:
     return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}")
 
 
-def _manifest_dir(service_name: str) -> str:
-    return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}manifests/{service_name}")
-
-
 def _docker_dir(service_name: str) -> str:
     return str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}docker/{service_name}")
 
 
 def _has_helm(files: list[str], service_name: str) -> bool:
     prefix = f"{ARTIFACT_PREFIX}helm/{service_name}/"
-    return any(f.startswith(prefix) for f in files)
-
-
-def _has_manifests(files: list[str], service_name: str) -> bool:
-    prefix = f"{ARTIFACT_PREFIX}manifests/{service_name}/"
     return any(f.startswith(prefix) for f in files)
 
 
@@ -78,35 +69,23 @@ def static_verifier_node(state: HarnessState) -> dict:
         checks.append(static.check_helm_dry_run_server(
             chart_path, rname, NAMESPACE, vf, log_dir=log_dir))
 
-    # ③ raw manifest 체크
-    if _has_manifests(files, service_name):
-        manifest_dir = _manifest_dir(service_name)
-
-        checks.append(static.check_yamllint(manifest_dir, log_dir=log_dir))
-        checks.append(static.check_kubeconform(manifest_dir, log_dir=log_dir))
-        checks.append(static.check_trivy_config(manifest_dir, log_dir=log_dir))
-        checks.append(static.check_gitleaks(manifest_dir, log_dir=log_dir))
-        checks.append(static.check_kubectl_dry_run_server(
-            manifest_dir, NAMESPACE, log_dir=log_dir))
-
-    # ④ custom image 체크 (Dockerfile)
+    # ③ custom image 체크 (Dockerfile)
     if _has_docker(files, service_name):
         checks.append(static.check_dockerfile(_docker_dir(service_name), log_dir=log_dir))
         checks.append(static.check_gitleaks(_docker_dir(service_name), log_dir=log_dir))
 
-    # ⑤ eBPF 소스 — 정적 도구 체크 없음 (빌드/연결은 사람이 직접 관리)
+    # eBPF 소스 — 정적 도구 체크 없음 (빌드/연결은 사람이 직접 관리)
     #    artifact_detection 통과 목적으로만 감지
 
-    # ⑥ 인식된 아티팩트가 없으면 fail
+    # ④ 인식된 아티팩트가 없으면 fail
     if not any([
         _has_helm(files, service_name),
-        _has_manifests(files, service_name),
         _has_docker(files, service_name),
         _has_ebpf(files),
     ]):
         checks.append(check_result(
             "artifact_detection", "fail",
-            f"No helm chart, manifests, Dockerfile, or eBPF source "
+            f"No helm chart, Dockerfile, or eBPF source "
             f"found for service '{service_name}' in dev_artifacts",
             log_dir,
         ))

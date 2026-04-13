@@ -5,8 +5,7 @@ run_runtime_phase1(service_name, sub_goal_name, phase_name) -> {"passed": bool, 
 
 배포 경로 자동 감지:
   has_helm      : edge-server/helm/<service>/  → helm upgrade --install → kubectl wait pods
-  has_manifests : edge-server/manifests/<service>/ → kubectl apply (pod wait 없음)
-  둘 다 없음    : 즉시 fail
+  없음          : 즉시 fail
 
 컨벤션 (context/base/conventions.md와 동기화):
   namespace      : <cluster.yaml namespace 필드 (기본 gikview)>
@@ -140,8 +139,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
 
     배포 유형 자동 감지:
       - edge-server/helm/<service>/ 존재 → helm upgrade --install + kubectl wait pods
-      - edge-server/manifests/<service>/ 존재 (helm 없음) → kubectl apply (pod wait 생략)
-      - 둘 다 없음 → 즉시 fail
+      - 없음 → 즉시 fail
 
     Phase 1 체크: deploy → kubectl_wait (helm만) → smoke_test
     events 조회는 Phase 2 LLM(kagent)이 담당. Phase 1에서는 수행하지 않음.
@@ -150,22 +148,19 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
         {"passed": bool, "checks": [{"name", "status", "detail", "log_path"}, ...]}
     """
     chart_path = str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}helm/{service_name}")
-    manifest_dir = str(PROJECT_ROOT / f"{ARTIFACT_PREFIX}manifests/{service_name}")
     rname = release_name(service_name)
     lsel = label_selector(service_name)
     smoke_test_path = PROJECT_ROOT / f"{ARTIFACT_PREFIX}tests/{phase_name}/smoke-test-{sub_goal_name}.sh"
 
     has_helm = Path(chart_path).is_dir()
-    has_manifests = Path(manifest_dir).is_dir()
 
     checks = []
 
     # ① 배포 아티팩트 없음 → 즉시 실패
-    if not has_helm and not has_manifests:
+    if not has_helm:
         checks.append(check_result(
             "deploy", "fail",
-            f"no helm chart at '{ARTIFACT_PREFIX}helm/{service_name}' or "
-            f"manifests at '{ARTIFACT_PREFIX}manifests/{service_name}'",
+            f"no helm chart at '{ARTIFACT_PREFIX}helm/{service_name}'",
             log_dir,
         ))
         return {"passed": False, "checks": checks}
@@ -175,12 +170,8 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
     registry = build_cfg.get("registry", "")
     image_tag = build_cfg.get("image_tag", "dev")
 
-    deploy_step = "helm_install" if has_helm else "kubectl_apply"
-    post_deploy_skips = (
-        [_skip("kubectl_wait"), _skip("smoke_test")]
-        if has_helm
-        else [_skip("smoke_test")]
-    )
+    deploy_step = "helm_install"
+    post_deploy_skips = [_skip("kubectl_wait"), _skip("smoke_test")]
 
     if not registry and (PROJECT_ROOT / f"{ARTIFACT_PREFIX}docker/{service_name}" / "Dockerfile").exists():
         checks.append(check_result(
@@ -250,14 +241,6 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
         else:
             checks.append(check_result("kubectl_wait", "skip",
                                        "CRD-only chart: no workload resources", log_dir))
-
-    else:
-        # manifest-only (CRD, 클러스터 레벨 설정 등) — pod wait 생략
-        r = kubectl.apply(manifest_dir, NAMESPACE)
-        checks.append(_from_run("kubectl_apply", r, log_dir))
-        if checks[-1]["status"] == "fail":
-            checks += [_skip("smoke_test")]
-            return {"passed": False, "checks": checks}
 
     # ⑤ smoke test
     if smoke_test_path.exists():

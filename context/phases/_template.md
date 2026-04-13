@@ -30,7 +30,6 @@
 
   · 하네스가 service_name으로 결정하는 경로/이름:
     - 배포 경로:     edge-server/helm/<service_name>/
-                     edge-server/manifests/<service_name>/
     - Helm release:  <service_name>
     - kubectl 셀렉터: app.kubernetes.io/name=<service_name>
     - Smoke test:    edge-server/tests/<phase>/smoke-test-<sub_goal>.sh
@@ -68,7 +67,7 @@
 ### 1. 목표 사양
 - **기능**: <무엇을 구현/변경하는가 — 1~3문장>
 - **기술 스택**: <컴포넌트 이름 + 버전, Helm chart 버전 (repo URL 포함)>
-- **배포 경로**: `edge-server/helm/<service-name>/` 또는 `edge-server/manifests/<service-name>/`
+- **배포 경로**: `edge-server/helm/<service-name>/`
 - **이미지**: `Docker Hub 공개 (<image>:<tag>)` 또는 `커스텀 빌드 (ghcr.io/<org>/<service-name>:<tag>)`
 
 ### 2. 인터페이스

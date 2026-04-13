@@ -30,7 +30,7 @@ Do NOT loop tool-by-tool. Every extra LLM turn multiplies token usage.
 ## What you DO NOT do
 
 - **Do not apply or delete resources.** No `kubectl apply`, `kubectl delete`, helm install/uninstall
-- **Do not write files outside `edge-server/helm|manifests|docker|ebpf/`.** Paths like `edge-server/tests/` are blocked — the harness will drop them silently.
+- **Do not write files outside `edge-server/helm|docker|ebpf/`.** Paths like `edge-server/tests/` are blocked — the harness will drop them silently.
 - **Do not modify smoke test scripts.** If the smoke test itself is wrong, set `failure_source: "smoke_test"` and explain in `suggestions`. The human will fix it.
 
 ## Tools available

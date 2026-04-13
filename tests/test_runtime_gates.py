@@ -34,7 +34,6 @@ def _fail(stderr="error", stdout=""):
 # edge-server/helm/<SERVICE>/ 디렉토리를 자동 생성한다.
 # helm.uninstall은 기본적으로 "release not found" (exit_code=1)로 mock하여
 # 모든 테스트에서 "fresh install" 시나리오를 기본값으로 동작시킨다.
-# manifest-path 테스트는 별도로 manifest_dir을 생성하고 helm_dir을 제거한다.
 
 _WORKLOAD_YAML = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n"
 
@@ -260,45 +259,6 @@ def test_values_dev_excluded_when_absent(tmp_path, monkeypatch):
     assert len(vf) == 1
     assert "values.yaml" in vf[0]
     assert not any("values-dev" in f for f in vf)
-
-
-# ── manifest-only 경로 ────────────────────────────────────────────────────────
-
-def test_manifest_deploy_pass(tmp_path, monkeypatch):
-    """manifest dir 존재, kubectl apply 성공 → passed=True, pod wait 없음."""
-    import shutil
-    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
-    (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
-
-    with (
-        patch("harness.tools.kubectl.apply", return_value=_ok()) as m_apply,
-    ):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is True
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["kubectl_apply"] == "pass"
-    assert "kubectl_wait" not in statuses   # pod wait 없음
-    assert statuses["smoke_test"] == "skip"
-    m_apply.assert_called_once_with(
-        str(tmp_path / "edge-server" / "manifests" / SERVICE),
-        "gikview",
-    )
-
-
-def test_manifest_deploy_fail(tmp_path, monkeypatch):
-    """kubectl apply 실패 → kubectl_apply=fail, 이후 skip."""
-    import shutil
-    shutil.rmtree(tmp_path / "edge-server" / "helm" / SERVICE)
-    (tmp_path / "edge-server" / "manifests" / SERVICE).mkdir(parents=True)
-
-    with patch("harness.tools.kubectl.apply", return_value=_fail("CRD not found")):
-        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
-
-    assert result["passed"] is False
-    statuses = {c["name"]: c["status"] for c in result["checks"]}
-    assert statuses["kubectl_apply"] == "fail"
-    assert statuses["smoke_test"] == "skip"
 
 
 # ── log_dir 저장 확인 ─────────────────────────────────────────────────────────

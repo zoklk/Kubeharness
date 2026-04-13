@@ -23,6 +23,16 @@ SERVICE = "prometheus"
 PHASE = "monitoring"
 
 
+# ── 격리 픽스처 ────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _isolate_project_root(tmp_path, monkeypatch):
+    """developer_node / _write_files 가 실제 프로젝트 디렉토리에 파일을 쓰지 않도록
+    PROJECT_ROOT 를 tmp_path 로 격리한다. 모든 테스트에 자동 적용."""
+    monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
+
+
 # ── 공통 헬퍼 ─────────────────────────────────────────────────────────────────
 
 def _state(service: str = SERVICE, phase: str = PHASE,
@@ -200,7 +210,7 @@ async def test_codeblock_json_parsed(tmp_path, monkeypatch):
     """```json...``` 코드 블록 응답도 정상 파싱."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
 
-    files = [{"path": "edge-server/manifests/app/deploy.yaml", "content": "kind: Deployment"}]
+    files = [{"path": "edge-server/helm/app/Chart.yaml", "content": "apiVersion: v2"}]
     wrapped = "```json\n" + json.dumps({"files": files, "notes": "wrapped"}) + "\n```"
     with (
         patch("harness.nodes.developer._load_tools", return_value=([], [])),
