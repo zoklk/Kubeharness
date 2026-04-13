@@ -21,7 +21,7 @@ from harness.llm.artifacts import scan_service_files, write_files as _shared_wri
 from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
 from harness.llm.json_utils import extract_json_dict
-from harness.llm.tool_loop import run_tool_loop
+from harness.llm.tool_loop import request_json_response, run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, load_node_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
@@ -32,6 +32,11 @@ _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "prompts" / "developer_prompt.md"
 _ALLOWED_PREFIX = ARTIFACT_PREFIX
 _MAX_TOOL_TURNS = 5
+
+_ARTIFACT_SCHEMA = (
+    '{"files": [{"path": "edge-server/helm/<svc>/...", "content": "..."}], '
+    '"notes": "..."}'
+)
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are an expert Kubernetes and Helm developer. "
@@ -336,6 +341,12 @@ async def developer_node(state: HarnessState) -> dict:
 
     final_content = messages[-1].get("content", "") if messages else ""
     artifacts = _parse_artifacts(final_content)
+
+    if artifacts is None:
+        data, messages = request_json_response(messages, dev_profile, _ARTIFACT_SCHEMA)
+        if data is not None and "files" in data:
+            artifacts = data
+            final_content = messages[-1].get("content", "")
 
     if artifacts is None:
         written_files: list[str] = []

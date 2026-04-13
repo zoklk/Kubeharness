@@ -26,7 +26,7 @@ from harness.llm import client as llm
 from harness.llm.artifacts import scan_service_files, write_files as _shared_write_files
 from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
-from harness.llm.tool_loop import run_tool_loop
+from harness.llm.tool_loop import request_json_response, run_tool_loop
 from harness.llm.json_utils import extract_json_dict
 from harness.mcp.kagent_client import get_kagent_tools, load_node_tools, tools_as_chat_dicts
 from harness.state import HarnessState
@@ -64,6 +64,14 @@ def _print_phase2(phase2: dict) -> None:
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "prompts" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 5
+
+_PHASE2_SCHEMA = (
+    '{"passed": false, '
+    '"failure_source": "implementation"|"smoke_test"|"environment", '
+    '"observations": [{"area": "...", "finding": "..."}], '
+    '"suggestions": ["..."], '
+    '"files": [{"path": "edge-server/...", "content": "..."}]}'
+)
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a Kubernetes deployment diagnostician. "
@@ -269,6 +277,12 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     )
 
     final_content = messages[-1].get("content", "") if messages else ""
+
+    if extract_json_dict(final_content) is None:
+        data, messages = request_json_response(messages, phase2_profile, _PHASE2_SCHEMA)
+        if data is not None:
+            final_content = messages[-1].get("content", "")
+
     phase2 = _parse_phase2(final_content)
 
     _print_phase2(phase2)

@@ -12,6 +12,7 @@ from rich.console import Console
 
 from harness.llm import client as llm
 from harness.llm.client import get_profile_cfg
+from harness.llm.json_utils import extract_json_dict
 
 _console = Console()
 
@@ -96,3 +97,43 @@ async def run_tool_loop(
     resp = llm.chat(messages, profile=profile)
     messages.append({"role": "assistant", "content": resp.get("content", "")})
     return messages
+
+
+def request_json_response(
+    messages: list[dict],
+    profile: str,
+    schema_hint: str,
+    max_retries: int = 2,
+) -> tuple[dict | None, list[dict]]:
+    """
+    LLM 응답 JSON 파싱 실패 시 재요청. tool_loop 이후 호출.
+
+    messages(대화 히스토리 전체)에 user 재요청 메시지를 append해
+    llm.chat()을 최대 max_retries회 호출한다.
+    성공 시 (parsed_dict, updated_messages), 실패 시 (None, updated_messages).
+    """
+    for attempt in range(1, max_retries + 1):
+        _console.print(
+            f"  [dim]⟳ JSON 재요청 {attempt}/{max_retries} ...[/dim]"
+        )
+        messages.append({
+            "role": "user",
+            "content": (
+                "Your previous response was not valid JSON. "
+                "Respond ONLY with a JSON object matching this schema — "
+                "no preamble, no markdown, no explanation:\n"
+                f"{schema_hint}"
+            ),
+        })
+        resp = llm.chat(messages, profile=profile)
+        content = resp.get("content", "")
+        messages.append({"role": "assistant", "content": content})
+
+        data = extract_json_dict(content)
+        if data is not None:
+            _console.print(f"  [dim green]✓ JSON 재요청 성공 (attempt {attempt})[/dim green]")
+            return data, messages
+
+        _console.print(f"  [dim yellow]✗ JSON 재요청 실패 (attempt {attempt})[/dim yellow]")
+
+    return None, messages
