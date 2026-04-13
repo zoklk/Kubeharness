@@ -115,7 +115,7 @@ def _write_files(files: list[dict]) -> tuple[list[str], str | None]:
 
 def _artifact_files_listing(service_name: str) -> str:
     """Phase 2 LLM에게 서비스 아티팩트 파일 목록 제공 — 제안 시 정확한 파일 경로 참조용."""
-    all_files = scan_service_files(service_name, subdirs=("helm", "manifests", "docker"))
+    all_files = scan_service_files(service_name, subdirs=("helm", "docker"))
     if not all_files:
         return ""
     return "\n\n## Artifact Files\n" + "\n".join(f"- `{f}`" for f in all_files)

@@ -40,7 +40,7 @@ _ARTIFACT_SCHEMA = (
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are an expert Kubernetes and Helm developer. "
-    "Write manifests or Helm charts according to the provided specifications. "
+    "Write Helm charts according to the provided specifications. "
     "Use available tools to inspect cluster state as needed. "
     "Respond ONLY with valid JSON matching this schema exactly:\n"
     f'{{"files": [{{"path": "{_ALLOWED_PREFIX}...", "content": "..."}}], "notes": "..."}}\n'

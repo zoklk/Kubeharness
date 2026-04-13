@@ -159,13 +159,13 @@ Each suggestion MUST be precise enough to apply without guessing. Include:
 | "Change the DNS record type to SRV" | "In `edge-server/helm/emqx/values.yaml`, change `EMQX_CLUSTER__DNS__RECORD_TYPE: "a"` to `EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"`" |
 | "Fix the node name format" | "In `edge-server/helm/emqx/templates/statefulset.yaml` line ~56, change `replace \"__POD_NAME__\" \"${POD_NAME}\"` to `replace \"__POD_NAME__\" \"$(POD_NAME)\"`" |
 
-A list of artifact files (Helm, manifests, docker) for the service is provided in the user message under `## Artifact Files` — use those exact paths in your suggestions or `files`.
+A list of artifact files (Helm, docker) for the service is provided in the user message under `## Artifact Files` — use those exact paths in your suggestions or `files`.
 
 ## Context you receive
 
 - sub_goal specification (what the service is supposed to do and its interface)
 - Phase 1 result summary (which step failed and the error message)
-- Artifact files list (exact paths to helm/manifests/docker files for this service)
+- Artifact files list (exact paths to helm/docker files for this service)
 - Technology Knowledge (if `context/knowledge/<tech>.md` exists, including dep services) — high-confidence baseline info including environment-specific values (DNS names, resource limits per env)
 
 ## Web Search
