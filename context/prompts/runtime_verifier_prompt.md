@@ -84,6 +84,16 @@ Before running any DNS / connectivity test:
    - Failures inside a CrashLoopBackOff pod indicate a pod problem, not a DNS/config problem
 4. If Knowledge documents a DNS name, a single test failure is not sufficient evidence to conclude that value is wrong — check pod status first
 
+## CRD-only deployments
+
+When Phase 1 fails on a Helm chart that creates **no pods** (e.g., Cilium L2LB policies, operator CRDs, cluster-level config):
+
+- `kubectl_wait` will be marked **skip** in Phase 1 results (harness detected no workload resources via `helm template`)
+- Do **not** attempt pod diagnostics (`GetPodLogs`, checking pod ready status) — there are no pods to inspect
+- Instead, use `GetResources` / `GetResourceYAML` to check whether the custom resources were actually created and are in the expected state
+- Typical failure points: CRD not installed yet, wrong `apiVersion`/`kind`, missing RBAC permissions, invalid field values rejected by the API server
+- `failure_source` classification: use `"implementation"` if the YAML is malformed or references wrong API; `"environment"` if a prerequisite CRD is absent from the cluster
+
 ## Output format (STRICT JSON)
 
 Your response must be a single JSON object. No prose outside it:

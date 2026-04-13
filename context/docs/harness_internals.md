@@ -201,7 +201,7 @@ LLM 없음. 결정적 실행.
 | docker build+push | `{PREFIX}docker/<service>/Dockerfile` 존재 | `config/build.yaml`의 `registry`로 빌드 후 푸시 |
 | helm upgrade --install | `{PREFIX}helm/<service>/` 존재 | `--wait` 없음 (빠른 적용) |
 | kubectl apply | `{PREFIX}manifests/<service>/` 존재 (helm 없을 때) | |
-| kubectl wait pods | helm 경로일 때만 | **2단계**: 60s 대기 → terminal 상태 감지 → terminal이면 즉시 fail / 아니면 240s 추가 대기 |
+| kubectl wait pods | helm 경로 + chart에 workload 리소스(Deployment/StatefulSet/DaemonSet 등) 있을 때만 | **2단계**: 60s 대기 → terminal 상태 감지 → terminal이면 즉시 fail / 아니면 240s 추가 대기. CRD-only chart는 `helm template` 분석 후 자동 skip |
 | smoke test | `{PREFIX}tests/<phase>/smoke-test-<sub_goal>.sh` 존재 시 | kubectl_wait 실패 시 skip |
 
 **values 파일**: `values.yaml` + `values-{active}.yaml` (static_verifier와 동일 로직)

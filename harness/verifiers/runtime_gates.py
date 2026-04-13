@@ -34,6 +34,11 @@ _TERMINAL_STATES = frozenset({
     "Error", "OOMKilled", "InvalidImageName", "CreateContainerConfigError",
 })
 
+# helm chart에 이 중 하나라도 있으면 pod wait 필요; 없으면 CRD-only → kubectl wait skip
+_WORKLOAD_KINDS = frozenset({
+    "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Job", "CronJob",
+})
+
 
 # ── 내부 헬퍼 ─────────────────────────────────────────────────────────────────
 
@@ -196,6 +201,19 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
     if has_helm:
         vf = values_files(chart_path)
 
+        # CRD-only 감지: helm template 분석으로 workload 리소스 유무 확인
+        # template 실패(네트워크 오류 등)는 안전한 기본값(True)으로 처리 → kubectl wait 수행
+        chart_has_workloads = True
+        template_r = helm.template(chart_path, rname, NAMESPACE, vf)
+        if template_r["exit_code"] == 0:
+            try:
+                chart_has_workloads = any(
+                    isinstance(doc, dict) and doc.get("kind") in _WORKLOAD_KINDS
+                    for doc in yaml.safe_load_all(template_r["stdout"])
+                )
+            except yaml.YAMLError:
+                pass
+
         # 항상 uninstall 후 install (release not found는 정상 — 무시)
         uninstall_r = helm.uninstall(rname, NAMESPACE)
         if uninstall_r["exit_code"] == 0:
@@ -207,26 +225,31 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
             checks += [_skip("kubectl_wait"), _skip("smoke_test")]
             return {"passed": False, "checks": checks}
 
-        # ④ kubectl wait pods — 2단계: 60s 조기 감지 + 240s 잔여 대기
-        # 60s 후 terminal 상태(CrashLoopBackOff 등)면 즉시 fail (300s 낭비 방지)
-        # 아직 기동 중(Pending/Init)이면 잔여 240s 대기
-        r60 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="60s")
-        if r60["exit_code"] == 0:
-            checks.append(_from_run("kubectl_wait", r60, log_dir))
-        else:
-            pods_r = kubectl.get_pods(NAMESPACE, label=lsel)
-            if _is_terminal_failure(pods_r):
-                detail = _terminal_detail(pods_r) or (r60["stderr"] or r60["stdout"]).strip() or "terminal failure after 60s"
-                checks.append(check_result("kubectl_wait", "fail",
-                                      f"early exit: {detail}",
-                                      log_dir, r60["stdout"] + r60["stderr"]))
+        # ④ kubectl wait pods (workload 리소스 있는 경우만; CRD-only chart는 skip)
+        if chart_has_workloads:
+            # 2단계: 60s 조기 감지 + 240s 잔여 대기
+            # 60s 후 terminal 상태(CrashLoopBackOff 등)면 즉시 fail (300s 낭비 방지)
+            # 아직 기동 중(Pending/Init)이면 잔여 240s 대기
+            r60 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="60s")
+            if r60["exit_code"] == 0:
+                checks.append(_from_run("kubectl_wait", r60, log_dir))
             else:
-                r240 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="240s")
-                checks.append(_from_run("kubectl_wait", r240, log_dir))
+                pods_r = kubectl.get_pods(NAMESPACE, label=lsel)
+                if _is_terminal_failure(pods_r):
+                    detail = _terminal_detail(pods_r) or (r60["stderr"] or r60["stdout"]).strip() or "terminal failure after 60s"
+                    checks.append(check_result("kubectl_wait", "fail",
+                                          f"early exit: {detail}",
+                                          log_dir, r60["stdout"] + r60["stderr"]))
+                else:
+                    r240 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="240s")
+                    checks.append(_from_run("kubectl_wait", r240, log_dir))
 
-        if checks[-1]["status"] == "fail":
-            checks.append(_skip("smoke_test"))
-            return {"passed": False, "checks": checks}
+            if checks[-1]["status"] == "fail":
+                checks.append(_skip("smoke_test"))
+                return {"passed": False, "checks": checks}
+        else:
+            checks.append(check_result("kubectl_wait", "skip",
+                                       "CRD-only chart: no workload resources", log_dir))
 
     else:
         # manifest-only (CRD, 클러스터 레벨 설정 등) — pod wait 생략

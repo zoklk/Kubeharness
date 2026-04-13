@@ -106,13 +106,13 @@ When a `## Technology Knowledge: <name>` section appears in your user message, i
 
 Runtime Verifier runs in this order:
 
-**커스텀 이미지가 있는 서비스** (`edge-server/docker/<service>/Dockerfile` 존재 시):
+**Service with custom image** (when `edge-server/docker/<service>/Dockerfile` exists):
 ```
 docker build -t <registry>/<service>:<image_tag> edge-server/docker/<service>/
 docker push <registry>/<service>:<image_tag>
 ```
 
-**Helm 기반 서비스** (`edge-server/helm/<service>/` 존재 시):
+**Helm-based service** (when `edge-server/helm/<service>/` exists):
 ```
 helm upgrade --install <service>-dev-v1 edge-server/helm/<service> \
   -n {NAMESPACE} \
@@ -121,13 +121,15 @@ helm upgrade --install <service>-dev-v1 edge-server/helm/<service> \
 kubectl wait --for=condition=Ready pods -l app.kubernetes.io/name=<service> -n {NAMESPACE} --timeout=300s
 ```
 
-**Manifest 기반 서비스** (`edge-server/manifests/<service>/` 존재 시, CRD 등):
+> **CRD-only charts** (chart contains no Deployment, StatefulSet, or DaemonSet): `kubectl wait` is automatically skipped. The smoke test still runs to verify the actual resource state.
+
+**Manifest-based service** (when `edge-server/manifests/<service>/` exists, for CRDs, cluster-level config, etc.):
 ```
 kubectl apply -f edge-server/manifests/<service>/ -n {NAMESPACE}
-# pod wait 없음 — smoke test가 실제 상태 검증
+# no pod wait — smoke test verifies actual state
 ```
 
-`<active_env>`는 `config/cluster.yaml`의 `active` 값 (기본 `dev`). values-dev.yaml과 values-prod.yaml **둘 다 작성해야** 하며, 테스트 시에는 active 환경의 파일만 적용된다.
+`<active_env>` is the `active` field in `config/cluster.yaml` (default `dev`). You must write **both** `values-dev.yaml` and `values-prod.yaml`; at test time only the active env's file is applied.
 
 Your chart must be installable with exactly this command, and your pods must carry the `app.kubernetes.io/name=<service>` label. If you wrote a Dockerfile, your `values.yaml` image reference must match `<registry>/<service>:<image_tag>` from `config/build.yaml`.
 

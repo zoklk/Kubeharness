@@ -36,12 +36,20 @@ def _fail(stderr="error", stdout=""):
 # 모든 테스트에서 "fresh install" 시나리오를 기본값으로 동작시킨다.
 # manifest-path 테스트는 별도로 manifest_dir을 생성하고 helm_dir을 제거한다.
 
+_WORKLOAD_YAML = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n"
+
+
 @pytest.fixture(autouse=True)
 def _default_helm_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("harness.verifiers.runtime_gates.PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         "harness.tools.helm.uninstall",
         lambda *a, **kw: _fail("Error: release: not found"),
+    )
+    # helm.template은 기본적으로 workload YAML 반환 → 기존 테스트 kubectl_wait 동작 유지
+    monkeypatch.setattr(
+        "harness.tools.helm.template",
+        lambda *a, **kw: _ok(_WORKLOAD_YAML),
     )
     (tmp_path / "edge-server" / "helm" / SERVICE).mkdir(parents=True, exist_ok=True)
     return tmp_path
@@ -396,3 +404,37 @@ def test_kubectl_wait_pending_then_240s_fail():
     statuses = {c["name"]: c["status"] for c in result["checks"]}
     assert statuses["kubectl_wait"] == "fail"
     assert m_wait.call_count == 2  # 60s + 240s
+
+
+# ── CRD-only chart (no workload resources) ───────────────────────────────────
+
+def test_helm_crd_only_skips_kubectl_wait(tmp_path):
+    """CRD-only chart (no Deployment/StatefulSet/DaemonSet) → kubectl_wait skip, phase1 passes."""
+    crd_yaml = "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: test\n"
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.helm.template", return_value=_ok(crd_yaml)),
+        patch("harness.tools.kubectl.wait") as m_wait,
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "skip"
+    assert "CRD-only" in next(c["detail"] for c in result["checks"] if c["name"] == "kubectl_wait")
+    m_wait.assert_not_called()
+
+
+def test_helm_template_fail_falls_back_to_wait(tmp_path):
+    """helm template 실패 시 safe default(chart_has_workloads=True) → kubectl wait 수행."""
+    with (
+        patch("harness.tools.helm.upgrade_install", return_value=_ok()),
+        patch("harness.tools.helm.template", return_value=_fail("helm error")),
+        patch("harness.tools.kubectl.wait", return_value=_ok()) as m_wait,
+    ):
+        result = run_runtime_phase1(SERVICE, SUB_GOAL, PHASE)
+
+    assert result["passed"] is True
+    statuses = {c["name"]: c["status"] for c in result["checks"]}
+    assert statuses["kubectl_wait"] == "pass"
+    m_wait.assert_called_once()  # fallback: treated as workload chart
