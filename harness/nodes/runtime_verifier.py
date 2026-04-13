@@ -74,7 +74,7 @@ _DEFAULT_SYSTEM_PROMPT = (
     "valid JSON matching this schema exactly:\n"
     '{"passed": false, "failure_source": "implementation"|"smoke_test"|"environment", '
     '"observations": [{"area": str, "finding": str}], "suggestions": [str], '
-    '"files": [{"path": "edge-server/...", "content": "full file content"}]}\n'
+    f'"files": [{{"path": "{ARTIFACT_PREFIX}...", "content": "full file content"}}]}}\n'
     "passed must always be false. "
     "failure_source: 'implementation' if the deployment code/config is wrong; "
     "'smoke_test' if the test script itself has a bug (wrong command, wrong assumption, wrong auth); "

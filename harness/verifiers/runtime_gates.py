@@ -159,8 +159,8 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
     if not has_helm and not has_manifests:
         checks.append(check_result(
             "deploy", "fail",
-            f"no helm chart at 'edge-server/helm/{service_name}' or "
-            f"manifests at 'edge-server/manifests/{service_name}'",
+            f"no helm chart at '{ARTIFACT_PREFIX}helm/{service_name}' or "
+            f"manifests at '{ARTIFACT_PREFIX}manifests/{service_name}'",
             log_dir,
         ))
         return {"passed": False, "checks": checks}
