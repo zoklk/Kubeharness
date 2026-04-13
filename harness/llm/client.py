@@ -162,7 +162,7 @@ def _chat_anthropic(
 
     kwargs: dict[str, Any] = {
         "model": model,
-        "max_tokens": 8096,
+        "max_tokens": cfg.get("max_tokens", 8096),
         "temperature": temperature,
         "messages": user_messages,
     }

@@ -11,16 +11,16 @@ from typing import Any
 from rich.console import Console
 
 from harness.llm import client as llm
+from harness.llm.client import get_profile_cfg
 
 _console = Console()
-
-_TOOL_RESULT_MAX_CHARS = 3000  # read_file 제외한 모든 tool 결과 최대 길이 (끝 N자 유지)
 
 
 async def _execute_tools_parallel(
     tool_calls: list[dict],
     tool_map: dict,
     tool_timeout: int = 60,
+    tool_result_max_chars: int = 3000,
 ) -> list[tuple[dict, str]]:
     """LLM이 요청한 tool_calls를 asyncio.gather로 병렬 실행."""
     async def _exec_one(tc: dict) -> tuple[dict, str]:
@@ -29,8 +29,8 @@ async def _execute_tools_parallel(
             return tc, f"Unknown tool: {tc['name']}"
         try:
             result = str(await asyncio.wait_for(tool.ainvoke(tc["input"]), timeout=tool_timeout))
-            if tc["name"] != "read_file" and len(result) > _TOOL_RESULT_MAX_CHARS:
-                result = result[-_TOOL_RESULT_MAX_CHARS:]
+            if tc["name"] != "read_file" and len(result) > tool_result_max_chars:
+                result = result[-tool_result_max_chars:]
             return tc, result
         except asyncio.TimeoutError:
             return tc, f"Tool timed out after {tool_timeout}s"
@@ -45,7 +45,6 @@ async def run_tool_loop(
     tools: list[dict],
     tool_objs: list,
     max_turns: int,
-    tool_timeout: int = 60,
     profile: str = "default",
 ) -> list[dict]:
     """
@@ -54,6 +53,10 @@ async def run_tool_loop(
     max_turns 회 후 tools 없이 최종 응답 요청.
     항상 마지막 메시지가 role=assistant인 상태로 반환.
     """
+    cfg = get_profile_cfg(profile)
+    tool_timeout = cfg.get("tool_timeout", 60)
+    tool_result_max_chars = cfg.get("tool_result_max_chars", 3000)
+
     tool_map = {t.name: t for t in tool_objs}
 
     for _ in range(max_turns):
@@ -78,7 +81,9 @@ async def run_tool_loop(
             assistant_msg["_gemini_raw_content"] = resp["_gemini_raw_content"]
         messages.append(assistant_msg)
 
-        results = await _execute_tools_parallel(resp["tool_calls"], tool_map, tool_timeout)
+        results = await _execute_tools_parallel(
+            resp["tool_calls"], tool_map, tool_timeout, tool_result_max_chars
+        )
         for tc, result_str in results:
             messages.append({
                 "role": "tool",

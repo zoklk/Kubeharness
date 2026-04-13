@@ -1,9 +1,16 @@
 # Harness 내부 동작 구조
 
-> phase 문서 작성자용. LLM에게는 전달되지 않음.
-> 이 문서를 모르면 phase 문서가 하네스 동작과 어긋나는 내용을 포함하게 됨.
+> harness 전체 구조 확인 및 작업 컨벤션
 
 > **경로 표기**: 이 문서에서 `{PREFIX}` 는 `ARTIFACT_PREFIX` 상수(`harness/config.py`)를 의미하며 현재 값은 `"edge-server/"`. 실제 경로를 변경하려면 해당 상수만 수정하면 됨.
+
+## 코드 작업 룰
+
+1. **구현 전 코드베이스 파악**: 기존 구현 코드를 먼저 확인하고, 추가할 기능을 어떻게 구현할지 계획한 뒤 작업한다.
+
+2. **하드코딩 최소화 / 중앙화**: 경로·상수·설정값은 하드코딩하지 않는다. 이미 비슷한 로직이 있다면 해당 모듈로 모아 중앙화한다. 신규 기능은 `run.py` 실행 시 확인 가능한 디버깅 출력(Rich `[dim]` 스타일 등)을 포함한다.
+
+3. **구현 후 테스트**: 작업을 마친 뒤에는 반드시 `.venv/bin/pytest tests/ -v`를 실행해 기존 코드와의 정합성을 확인한다.
 
 ---
 
@@ -131,7 +138,7 @@ You MUST write `values-dev.yaml` AND `values-prod.yaml` for EVERY service.
 
 ### Tool loop
 
-최대 **20턴**. 초과 시 tools 없이 최종 응답 요청.
+최대 **5턴** (profile `max_tool_turns`로 오버라이드). 초과 시 tools 없이 최종 응답 요청.
 
 ### 사용 가능 툴
 
@@ -236,8 +243,9 @@ LLM 없음. 결정적 실행.
   ```
 - `passed`는 항상 `false` (Phase 1이 실패했으므로)
 - `failure_source`: 실패 원인 분류. `smoke_test` 로 분류되면 run.py가 자동 재시도를 즉시 중단하고 사람 개입 요구 (`--skip-interrupt` 무관).
-- Tool loop 최대 **30턴** (profile `max_tool_turns`로 오버라이드 가능). 초과 시 tools 없이 최종 응답 요청.
-- **tool 결과 크기 제한**: `read_file` 제외 모든 tool 결과는 끝 3,000자로 잘림 (TPM 초과 방지, `harness/llm/tool_loop.py`).
+- Tool loop 최대 **5턴** (profile `max_tool_turns`로 오버라이드 가능). 초과 시 tools 없이 최종 응답 요청.
+- **tool 결과 크기 제한**: `read_file` 제외 모든 tool 결과는 끝 3,000자로 잘림 (TPM 초과 방지). 값은 profile `tool_result_max_chars` 키로 조정 가능.
+- **web_search**: `claude-verifier` 프로파일에 `web_search` 섹션이 있으면 항상 활성화 (Anthropic 내장 도구). 사용 지침은 시스템 프롬프트에 포함됨. `tool_type` 키로 API 버전 지정, `max_uses`로 한 실행당 최대 검색 횟수 제한.
 
 ### 라우팅
 
@@ -313,3 +321,75 @@ phase 문서가 하네스와 어긋나는 경우 체크:
 - [ ] dependency 필드가 `` `service_name` `` 형식(백틱)으로 작성됐는가
 - [ ] kubectl wait timeout이 `300s`인가 (helm 배포 기준)
 - [ ] Helm release name이 `<service_name>-dev-v1`인가
+
+---
+
+## 10. LLM 설정 시스템
+
+### 프로파일 (`config/llm.yaml`)
+
+모든 LLM 설정은 `config/llm.yaml`의 프로파일로 중앙 관리된다.
+
+```yaml
+node_profiles:
+  developer: default                    # developer 노드 → default 프로파일
+  runtime_verifier_phase2: claude-verifier  # Phase 2 LLM → claude-verifier 프로파일
+
+profiles:
+  default:
+    provider: gemini
+    model: gemma-4-31b-it
+    max_tool_turns: 5
+    tool_timeout: 60
+    tool_result_max_chars: 3000
+    ...
+
+  claude-verifier:
+    provider: anthropic
+    model: claude-sonnet-4-6
+    prompt_caching: true
+    max_tokens: 8096
+    max_tool_turns: 5
+    tool_timeout: 60
+    tool_result_max_chars: 3000
+    web_search:
+      tool_type: "web_search_20260209"
+      max_uses: 5
+```
+
+**프로파일 키 일람**:
+
+| 키 | 설명 | 기본값 |
+|----|------|--------|
+| `provider` | `anthropic` / `gemini` / `openai_compat` | — |
+| `model` | 모델 ID | provider별 폴백 |
+| `temperature` | LLM temperature | 0.1 |
+| `max_tokens` | 최대 출력 토큰 (anthropic만 유효) | 8096 |
+| `max_tool_turns` | tool loop 최대 턴 | 5 |
+| `tool_timeout` | tool 1회 실행 최대 대기(초) | 60 |
+| `tool_result_max_chars` | tool 결과 최대 길이(`read_file` 제외) | 3000 |
+| `prompt_caching` | Anthropic prompt caching 활성화 | false |
+| `web_search.tool_type` | Anthropic web_search 내장 도구 타입 | `web_search_20260209` |
+| `web_search.max_uses` | Phase 2 실행당 최대 검색 횟수 | 5 |
+
+### 멀티 프로바이더
+
+`harness/llm/client.py`의 `chat()` 함수가 `provider` 키에 따라 내부적으로 `_chat_anthropic` / `_chat_gemini` / `_chat_openai_compat` 중 하나를 호출한다. 노드 코드는 `run_tool_loop()` → `llm.chat()` 만 호출하면 되고 프로바이더 차이를 알 필요 없다.
+
+### 프롬프트 캐싱 (`prompt_caching: true`)
+
+Anthropic 전용. 활성화 시 다음 두 위치에 cache breakpoint를 삽입한다:
+
+1. **system 메시지** 전체 (대용량 system prompt 반복 전송 비용 절감)
+2. **첫 번째 user 메시지** (초기 컨텍스트 캐시)
+3. **중간 tool result 배치** 마지막 2개 (4슬롯 한도 내에서 최대 활용)
+
+토큰 사용량(`in=`, `out=`, `cache_write=`, `cache_hit=`)은 콘솔에 dim 스타일로 출력됨.
+
+### 병렬 툴 실행
+
+`run_tool_loop()`에서 한 턴에 LLM이 여러 `tool_calls`를 반환하면 `asyncio.gather`로 병렬 실행한다 (`_execute_tools_parallel`). 각 tool은 `tool_timeout`(초) 내에 완료해야 하며 초과 시 TimeoutError 메시지를 결과로 반환한다. `read_file` 이외의 결과는 `tool_result_max_chars` 길이로 끝부터 잘린다.
+
+### Web Search (Anthropic 내장)
+
+`claude-verifier` 프로파일에 `web_search` 섹션이 있으면 Runtime Verifier Phase 2에서 항상 활성화된다. Anthropic API에 built-in tool로 전달되며, 검색 지침은 system prompt(`context/prompts/runtime_verifier_prompt.md`)에 포함된다 — user message 중복 주입 없음.

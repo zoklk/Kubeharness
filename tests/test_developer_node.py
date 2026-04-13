@@ -297,7 +297,7 @@ async def test_tools_load_inner_exception_returns_empty():
     async def _raise(*args, **kwargs):
         raise Exception("no cluster")
 
-    with patch("harness.nodes.developer.get_kagent_tools", new=_raise):
+    with patch("harness.mcp.kagent_client.get_kagent_tools", new=_raise):
         objs, dicts = await _load_tools()
 
     assert objs == []

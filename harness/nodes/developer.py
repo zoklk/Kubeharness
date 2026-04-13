@@ -11,7 +11,6 @@ Developer 노드.
 6. dev_artifacts 업데이트 반환
 """
 
-import json
 import re
 from pathlib import Path
 
@@ -19,9 +18,11 @@ from rich.console import Console
 
 from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
 from harness.llm.artifacts import scan_service_files, write_files as _shared_write_files
+from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
+from harness.llm.json_utils import extract_json_dict
 from harness.llm.tool_loop import run_tool_loop
-from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
+from harness.mcp.kagent_client import get_kagent_tools, load_node_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
 
@@ -30,7 +31,7 @@ _console = Console()
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "prompts" / "developer_prompt.md"
 _ALLOWED_PREFIX = ARTIFACT_PREFIX
-_MAX_TOOL_TURNS = 30
+_MAX_TOOL_TURNS = 5
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are an expert Kubernetes and Helm developer. "
@@ -201,12 +202,7 @@ def _build_user_message(
 
 async def _load_tools() -> tuple[list, list[dict]]:
     """kagent developer_tools 로드. 실패 시 경고 후 빈 리스트로 graceful degradation."""
-    try:
-        tool_objs = await get_kagent_tools("developer_tools")
-        return tool_objs, tools_as_chat_dicts(tool_objs)
-    except Exception as e:
-        _console.print(f"  [yellow]⚠ kagent tools unavailable (developer): {e}[/yellow]")
-        return [], []
+    return await load_node_tools("developer_tools", "developer", _console)
 
 
 def _debug_print_context(message: str) -> None:
@@ -286,23 +282,9 @@ def _parse_artifacts(content: str) -> dict | None:
     3-strategy JSON 추출.
     {"files": [...], "notes": "..."} 형식이면 반환, 아니면 None.
     """
-    text = content.strip()
-    candidates: list[str] = [text]
-
-    for m in re.finditer(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL):
-        candidates.append(m.group(1).strip())
-
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start:end + 1])
-
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-            if isinstance(data, dict) and "files" in data:
-                return data
-        except (json.JSONDecodeError, ValueError):
-            continue
+    data = extract_json_dict(content)
+    if data is not None and "files" in data:
+        return data
     return None
 
 
@@ -344,10 +326,13 @@ async def developer_node(state: HarnessState) -> dict:
         {"role": "user", "content": user_message},
     ]
 
+    dev_profile = get_node_profile("developer")
+    dev_max_turns = get_profile_cfg(dev_profile).get("max_tool_turns", _MAX_TOOL_TURNS)
+
     kagent_objs, kagent_dicts = await _load_tools()
     tool_objs = [*kagent_objs, ReadFileTool()]
     tools_dicts = [*kagent_dicts, read_file_tool_dict()]
-    messages = await run_tool_loop(messages, tools_dicts, tool_objs, max_turns=_MAX_TOOL_TURNS)
+    messages = await run_tool_loop(messages, tools_dicts, tool_objs, max_turns=dev_max_turns, profile=dev_profile)
 
     final_content = messages[-1].get("content", "") if messages else ""
     artifacts = _parse_artifacts(final_content)

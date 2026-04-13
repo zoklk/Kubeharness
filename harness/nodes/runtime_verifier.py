@@ -14,8 +14,6 @@ Phase 1 fail → Phase 2 진단 실행, verification.passed=False (항상)
 """
 
 import asyncio
-import json
-import re
 from pathlib import Path
 
 from rich import box
@@ -29,7 +27,8 @@ from harness.llm.artifacts import scan_service_files, write_files as _shared_wri
 from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
 from harness.llm.tool_loop import run_tool_loop
-from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
+from harness.llm.json_utils import extract_json_dict
+from harness.mcp.kagent_client import get_kagent_tools, load_node_tools, tools_as_chat_dicts
 from harness.state import HarnessState
 from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
 from harness.verifiers import node_log_dir
@@ -64,7 +63,7 @@ def _print_phase2(phase2: dict) -> None:
 
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "prompts" / "runtime_verifier_prompt.md"
-_MAX_TOOL_TURNS = 30
+_MAX_TOOL_TURNS = 5
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a Kubernetes deployment diagnostician. "
@@ -98,12 +97,7 @@ def _load_system_prompt() -> str:
 
 async def _load_tools() -> tuple[list, list[dict]]:
     """kagent tools 로드. 실패 시 경고 후 빈 리스트로 graceful degradation."""
-    try:
-        tool_objs = await get_kagent_tools("runtime_verifier_tools")
-        return tool_objs, tools_as_chat_dicts(tool_objs)
-    except Exception as e:
-        _console.print(f"  [yellow]⚠ kagent tools unavailable (runtime_verifier): {e}[/yellow]")
-        return [], []
+    return await load_node_tools("runtime_verifier_tools", "runtime_verifier", _console)
 
 
 def _write_files(files: list[dict]) -> tuple[list[str], str | None]:
@@ -138,39 +132,20 @@ def _phase1_summary(phase1: dict) -> str:
 
 def _parse_phase2(content: str) -> dict:
     """
-    Robust JSON 추출. 세 가지 전략을 순서대로 시도:
-    1. 전체 텍스트 직접 파싱
-    2. ```json...``` / ```...``` 코드 블록 추출
-    3. 첫 { 부터 마지막 } 까지 추출 (앞뒤 서론/후론 무시)
+    Robust JSON 추출 (extract_json_dict 위임).
+    failure_source 정규화 및 기본값 로직 유지.
     """
-    text = content.strip()
-    candidates: list[str] = [text]
-
-    # 전략 2: 코드 블록
-    for m in re.finditer(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL):
-        candidates.append(m.group(1).strip())
-
-    # 전략 3: 첫 { ~ 마지막 }
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        candidates.append(text[start : end + 1])
-
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-            if isinstance(data, dict):
-                raw_source = data.get("failure_source", "")
-                failure_source = raw_source if raw_source in ("implementation", "smoke_test", "environment") else "implementation"
-                return {
-                    "passed": bool(data.get("passed", False)),
-                    "failure_source": failure_source,
-                    "observations": data.get("observations", []),
-                    "suggestions": data.get("suggestions", []),
-                    "files": data.get("files", []),
-                }
-        except (json.JSONDecodeError, ValueError):
-            continue
-
+    data = extract_json_dict(content)
+    if data is not None:
+        raw_source = data.get("failure_source", "")
+        failure_source = raw_source if raw_source in ("implementation", "smoke_test", "environment") else "implementation"
+        return {
+            "passed": bool(data.get("passed", False)),
+            "failure_source": failure_source,
+            "observations": data.get("observations", []),
+            "suggestions": data.get("suggestions", []),
+            "files": data.get("files", []),
+        }
     return {
         "passed": False,
         "observations": [],
@@ -280,18 +255,10 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
 
     if web_search_active:
         tools_dicts = tools_dicts + [{
-            "type": "web_search_20260209",
+            "type": web_cfg.get("tool_type", "web_search_20260209"),
             "name": "web_search",
             "max_uses": web_cfg.get("max_uses", 5),
         }]
-        messages[-1]["content"] += (
-            "\n\n## Web Search Instructions\n"
-            "Web search is now available. Before searching:\n"
-            "1. State your hypothesis explicitly: what you believe is the root cause and why.\n"
-            "2. Use web_search to validate or refute the hypothesis with up-to-date sources (prioritize 2026).\n"
-            "3. If the hypothesis is refuted, form a new one and search again.\n"
-            "Do NOT search without a stated hypothesis first."
-        )
 
     phase2_max_turns = get_profile_cfg(phase2_profile).get("max_tool_turns", _MAX_TOOL_TURNS)
 
