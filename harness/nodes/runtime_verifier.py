@@ -25,6 +25,7 @@ from rich.table import Table
 from harness.config import NAMESPACE, PROJECT_ROOT, build_cluster_env_section
 from harness.llm import client as llm
 from harness.llm.artifacts import scan_service_files
+from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
@@ -59,7 +60,7 @@ def _print_phase2(phase2: dict) -> None:
 
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "prompts" / "runtime_verifier_prompt.md"
-_MAX_TOOL_TURNS = 10
+_MAX_TOOL_TURNS = 30
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are a Kubernetes deployment diagnostician. "
@@ -282,8 +283,40 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
         },
     ]
 
+    phase2_profile = get_node_profile("runtime_verifier_phase2")
+    web_cfg = get_profile_cfg(phase2_profile).get("web_search", {})
+    error_count = state.get("error_count", 0)
+
+    web_search_active = bool(
+        web_cfg
+        and error_count >= web_cfg.get("trigger_error_count", 2)
+    )
+
     tool_objs, tools_dicts = await _load_tools()
-    messages = await run_tool_loop(messages, tools_dicts, tool_objs, max_turns=_MAX_TOOL_TURNS)
+
+    if web_search_active:
+        tools_dicts = tools_dicts + [{
+            "type": "web_search_20260209",
+            "name": "web_search",
+            "max_uses": web_cfg.get("max_uses", 5),
+        }]
+        # user message 끝에 가설 기반 웹검색 지시 추가
+        messages[-1]["content"] += (
+            "\n\n## Web Search Instructions\n"
+            "Web search is now available. Before searching:\n"
+            "1. State your hypothesis explicitly: what you believe is the root cause and why.\n"
+            "2. Use web_search to validate or refute the hypothesis with up-to-date sources (prioritize 2025-2026).\n"
+            "3. If the hypothesis is refuted, form a new one and search again.\n"
+            "Do NOT search without a stated hypothesis first."
+        )
+
+    phase2_max_turns = get_profile_cfg(phase2_profile).get("max_tool_turns", _MAX_TOOL_TURNS)
+
+    messages = await run_tool_loop(
+        messages, tools_dicts, tool_objs,
+        max_turns=phase2_max_turns,
+        profile=phase2_profile,
+    )
 
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)
@@ -291,16 +324,17 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     # parse 실패 시 1회 retry: JSON만 요청
     if phase2["suggestions"] and phase2["suggestions"][0].startswith("LLM response parse failed:"):
         _console.print("  [yellow]⚠ Phase 2 parse failed — retrying with JSON-only request ...[/yellow]")
-        messages.append({
-            "role": "user",
-            "content": (
-                "Your previous response could not be parsed as JSON. "
-                "Respond with ONLY a valid JSON object — no prose, no fences, no explanation.\n"
-                'Schema: {"passed": false, "observations": [{"area": "...", "finding": "..."}], "suggestions": ["..."]}\n'
-                "Use your prior tool findings to fill in the values."
-            ),
-        })
-        retry_resp = llm.chat(messages)  # tools 없음 — JSON 추출 전용
+        # 전체 히스토리 재전송 없이 직전 응답만 포함한 최소 컨텍스트로 retry
+        retry_messages = [
+            {"role": "system", "content": _load_system_prompt()},
+            {"role": "user", "content": (
+                "The following text is your previous diagnostic response. "
+                "Reformat it as ONLY a valid JSON object — no prose, no fences, no explanation.\n"
+                'Schema: {"passed": false, "observations": [{"area": "...", "finding": "..."}], "suggestions": ["..."]}\n\n'
+                f"Previous response:\n{final_content}"
+            )},
+        ]
+        retry_resp = llm.chat(retry_messages, profile=phase2_profile)  # tools 없음 — JSON 추출 전용
         retry_content = retry_resp.get("content", "")
         phase2_retry = _parse_phase2(retry_content)
         if not (phase2_retry["suggestions"] and phase2_retry["suggestions"][0].startswith("LLM response parse failed:")):

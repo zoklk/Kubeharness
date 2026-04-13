@@ -3,20 +3,44 @@ import time
 import yaml
 from typing import Any
 
+from rich.console import Console
+
 from harness.config import PROJECT_ROOT
 
 _CONFIG_PATH = PROJECT_ROOT / "config" / "llm.yaml"
+_console = Console()
 
 
-def _load_config() -> dict:
+def _load_profile(profile: str = "default") -> dict:
     with open(_CONFIG_PATH) as f:
-        return yaml.safe_load(f)
+        raw = yaml.safe_load(f)
+    # 하위 호환: profiles 키가 없으면 기존 플랫 구조를 그대로 반환
+    if "profiles" not in raw:
+        return raw
+    return raw["profiles"][profile]
+
+
+def get_node_profile(node_name: str) -> str:
+    """node_profiles 섹션에서 노드별 프로파일 이름 반환. 없으면 'default'."""
+    with open(_CONFIG_PATH) as f:
+        raw = yaml.safe_load(f)
+    return raw.get("node_profiles", {}).get(node_name, "default")
+
+
+def get_profile_cfg(profile: str) -> dict:
+    """profiles 섹션에서 프로파일 설정 반환."""
+    with open(_CONFIG_PATH) as f:
+        raw = yaml.safe_load(f)
+    if "profiles" not in raw:
+        return raw  # 하위 호환
+    return raw["profiles"][profile]
 
 
 def chat(
     messages: list[dict],
     tools: list[dict] | None = None,
     response_format: dict | None = None,
+    profile: str = "default",
 ) -> dict:
     """
     Returns:
@@ -26,7 +50,7 @@ def chat(
             "raw": <provider response>
         }
     """
-    cfg = _load_config()
+    cfg = _load_profile(profile)
     provider = cfg.get("provider", "anthropic")
 
     if provider == "anthropic":
@@ -52,7 +76,7 @@ def _chat_anthropic(
         raise EnvironmentError(f"Environment variable {cfg['api_key_env']} is not set")
 
     client = anthropic.Anthropic(api_key=api_key)
-    model = cfg.get("model", "claude-sonnet-4-20250514")
+    model = cfg.get("model", "claude-sonnet-4-6")
     temperature = cfg.get("temperature", 0.1)
 
     # system 메시지 분리 (Anthropic API는 system을 별도 파라미터로)
@@ -60,11 +84,17 @@ def _chat_anthropic(
     #   assistant: tool_calls 포함 가능 (multi-turn)
     #   tool: {"role":"tool","tool_call_id":"...","name":"...","content":"..."}
     system = None
-    user_messages = []
+    non_system = [m for m in messages if m["role"] != "system"]
     for m in messages:
         if m["role"] == "system":
             system = m["content"]
-        elif m["role"] == "assistant":
+
+    user_messages = []
+    first_user_cached = False
+    i = 0
+    while i < len(non_system):
+        m = non_system[i]
+        if m["role"] == "assistant":
             parts: list[Any] = []
             if m.get("content"):
                 parts.append({"type": "text", "text": m["content"]})
@@ -76,17 +106,30 @@ def _chat_anthropic(
                     "input": tc["input"],
                 })
             user_messages.append({"role": "assistant", "content": parts or m.get("content", "")})
+            i += 1
         elif m["role"] == "tool":
-            user_messages.append({
-                "role": "user",
-                "content": [{
+            # Anthropic requires all tool_results from the same turn in a SINGLE user message
+            tool_results = []
+            while i < len(non_system) and non_system[i]["role"] == "tool":
+                tool_results.append({
                     "type": "tool_result",
-                    "tool_use_id": m["tool_call_id"],
-                    "content": m["content"],
-                }],
-            })
+                    "tool_use_id": non_system[i]["tool_call_id"],
+                    "content": non_system[i]["content"],
+                })
+                i += 1
+            user_messages.append({"role": "user", "content": tool_results})
         else:
-            user_messages.append(m)
+            # prompt_caching 활성 시 첫 번째 user 메시지(대형 컨텍스트)에 cache breakpoint 추가.
+            # 이후 턴에서 system + 초기 user message 양쪽 모두 cache_hit 적용됨.
+            if cfg.get("prompt_caching") and not first_user_cached and isinstance(m.get("content"), str):
+                user_messages.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": m["content"], "cache_control": {"type": "ephemeral"}}],
+                })
+                first_user_cached = True
+            else:
+                user_messages.append(m)
+            i += 1
 
     kwargs: dict[str, Any] = {
         "model": model,
@@ -94,16 +137,36 @@ def _chat_anthropic(
         "temperature": temperature,
         "messages": user_messages,
     }
+
+    # 프롬프트 캐싱: system을 content block 리스트로 변환
     if system:
-        kwargs["system"] = system
+        if cfg.get("prompt_caching"):
+            kwargs["system"] = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+            ]
+        else:
+            kwargs["system"] = system
+
     if tools:
+        # "type" 필드가 있는 항목은 Anthropic 내장 도구(web_search 등) → 그대로 전달
         kwargs["tools"] = [
+            t if "type" in t else
             {"name": t["name"], "description": t.get("description", ""), "input_schema": t["input_schema"]}
             for t in tools
         ]
 
     retryable = (anthropic.APIConnectionError, anthropic.APITimeoutError)
     raw = _retry(lambda: client.messages.create(**kwargs), retryable)
+
+    # 토큰 사용량 로깅 (캐싱 활성 프로파일에서만 출력)
+    if cfg.get("prompt_caching"):
+        u = raw.usage
+        parts = [f"in={u.input_tokens}", f"out={u.output_tokens}"]
+        if getattr(u, "cache_creation_input_tokens", 0):
+            parts.append(f"cache_write={u.cache_creation_input_tokens}")
+        if getattr(u, "cache_read_input_tokens", 0):
+            parts.append(f"cache_hit={u.cache_read_input_tokens}")
+        _console.print(f"  [dim]Claude tokens: {' | '.join(parts)}[/dim]")
 
     content = ""
     tool_calls = None

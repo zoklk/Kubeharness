@@ -15,6 +15,11 @@ from harness.llm import client as llm
 _console = Console()
 
 
+# Anthropic server-side built-in tools: executed by Anthropic, not the client.
+# Sending any tool_result content — the API substitutes real results on its side.
+_ANTHROPIC_SERVER_SIDE_TOOLS = {"web_search"}
+
+
 async def _execute_tools_parallel(
     tool_calls: list[dict],
     tool_map: dict,
@@ -22,6 +27,10 @@ async def _execute_tools_parallel(
 ) -> list[tuple[dict, str]]:
     """LLM이 요청한 tool_calls를 asyncio.gather로 병렬 실행."""
     async def _exec_one(tc: dict) -> tuple[dict, str]:
+        if tc["name"] in _ANTHROPIC_SERVER_SIDE_TOOLS:
+            # Anthropic이 서버에서 실행하는 built-in 툴 — 클라이언트는 빈 결과만 반환.
+            # "Unknown tool" 문자열을 모델에게 보내면 무한 재시도 루프 발생.
+            return tc, ""
         tool = tool_map.get(tc["name"])
         if tool is None:
             return tc, f"Unknown tool: {tc['name']}"
@@ -41,6 +50,7 @@ async def run_tool_loop(
     tool_objs: list,
     max_turns: int,
     tool_timeout: int = 60,
+    profile: str = "default",
 ) -> list[dict]:
     """
     LLM이 tool_calls를 반환하는 동안 실행 루프.
@@ -51,7 +61,7 @@ async def run_tool_loop(
     tool_map = {t.name: t for t in tool_objs}
 
     for _ in range(max_turns):
-        resp = llm.chat(messages, tools=tools or None)
+        resp = llm.chat(messages, tools=tools or None, profile=profile)
 
         if not resp.get("tool_calls"):
             messages.append({"role": "assistant", "content": resp.get("content", "")})
@@ -82,6 +92,6 @@ async def run_tool_loop(
             })
 
     # max turns 초과 → tools 없이 최종 응답 요청
-    resp = llm.chat(messages)
+    resp = llm.chat(messages, profile=profile)
     messages.append({"role": "assistant", "content": resp.get("content", "")})
     return messages

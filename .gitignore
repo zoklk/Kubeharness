@@ -35,3 +35,5 @@ config/cluster.yaml
 
 # 임시 스크립트
 check_gemini_model.py
+
+log

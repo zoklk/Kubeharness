@@ -30,7 +30,7 @@ _console = Console()
 _CONTEXT_DIR = PROJECT_ROOT / "context"
 _PROMPT_PATH = _CONTEXT_DIR / "prompts" / "developer_prompt.md"
 _ALLOWED_PREFIX = ARTIFACT_PREFIX
-_MAX_TOOL_TURNS = 20
+_MAX_TOOL_TURNS = 30
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are an expert Kubernetes and Helm developer. "
