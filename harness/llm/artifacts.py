@@ -7,6 +7,10 @@ from harness.config import ARTIFACT_PREFIX, PROJECT_ROOT
 
 _DEFAULT_SUBDIRS = ("helm", "manifests", "docker", "ebpf")
 
+# LLM이 쓸 수 있는 하위 디렉터리 허용 목록.
+# edge-server/tests/ 는 smoke test 보호를 위해 의도적으로 제외.
+_ALLOWED_WRITE_SUBDIRS = ("helm/", "manifests/", "docker/", "ebpf/")
+
 
 def write_files(
     files: list[dict],
@@ -17,8 +21,9 @@ def write_files(
     prefix 검증 후 원자적 파일 쓰기. developer_node와 runtime_verifier_node 공용.
 
     Phase 1 — Pre-validation:
-        - prefix 위반(allowed_prefix 미준수) → 조용히 skip
-        - 빈 content → 조용히 skip
+        - prefix 위반(allowed_prefix 미준수) → drop
+        - 허용 서브디렉터리(helm/manifests/docker/ebpf) 외 경로 → drop (tests/ 등 차단)
+        - 빈 content → drop
         - 유효 파일만 valid_files에 수집
 
     Phase 2 — Atomic write:
@@ -39,6 +44,10 @@ def write_files(
         content = f.get("content", "")
         if not path.startswith(allowed_prefix):
             _con.print(f"  [red]⚠ prefix violation — dropped:[/red] {path!r}")
+            continue
+        rel = path[len(allowed_prefix):]
+        if not any(rel.startswith(sub) for sub in _ALLOWED_WRITE_SUBDIRS):
+            _con.print(f"  [red]⚠ write blocked (allowed: helm/manifests/docker/ebpf) — dropped:[/red] {path!r}")
             continue
         if not content:
             _con.print(f"  [yellow]⚠ empty content — dropped:[/yellow] {path!r}")

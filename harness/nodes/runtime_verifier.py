@@ -72,9 +72,14 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Use the available tools to investigate the root cause "
     "(pod logs, events, describe resources), then respond ONLY with "
     "valid JSON matching this schema exactly:\n"
-    '{"passed": false, "observations": [{"area": str, "finding": str}], "suggestions": [str], '
+    '{"passed": false, "failure_source": "implementation"|"smoke_test"|"environment", '
+    '"observations": [{"area": str, "finding": str}], "suggestions": [str], '
     '"files": [{"path": "edge-server/...", "content": "full file content"}]}\n'
-    "passed must always be false. Focus on actionable fix suggestions. "
+    "passed must always be false. "
+    "failure_source: 'implementation' if the deployment code/config is wrong; "
+    "'smoke_test' if the test script itself has a bug (wrong command, wrong assumption, wrong auth); "
+    "'environment' if the issue is outside the deployment (cluster, DNS, network). "
+    "When failure_source='smoke_test', set files=[] and explain the test bug in suggestions. "
     "files is optional — include only when you need to modify files to fix the issue. "
     "Use read_file tool to check current file content before writing. "
     "Do not include any text outside the JSON object."
@@ -154,8 +159,11 @@ def _parse_phase2(content: str) -> dict:
         try:
             data = json.loads(candidate)
             if isinstance(data, dict):
+                raw_source = data.get("failure_source", "")
+                failure_source = raw_source if raw_source in ("implementation", "smoke_test", "environment") else "implementation"
                 return {
                     "passed": bool(data.get("passed", False)),
+                    "failure_source": failure_source,
                     "observations": data.get("observations", []),
                     "suggestions": data.get("suggestions", []),
                     "files": data.get("files", []),
@@ -296,28 +304,6 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     final_content = messages[-1].get("content", "") if messages else ""
     phase2 = _parse_phase2(final_content)
 
-    # parse 실패 시 1회 retry: JSON만 요청
-    if phase2["suggestions"] and phase2["suggestions"][0].startswith("LLM response parse failed:"):
-        _console.print("  [yellow]⚠ Phase 2 parse failed — retrying with JSON-only request ...[/yellow]")
-        retry_messages = [
-            {"role": "system", "content": _load_system_prompt()},
-            {"role": "user", "content": (
-                "The following text is your previous diagnostic response. "
-                "Reformat it as ONLY a valid JSON object — no prose, no fences, no explanation.\n"
-                'Schema: {"passed": false, "observations": [{"area": "...", "finding": "..."}], '
-                '"suggestions": ["..."], "files": [{"path": "edge-server/...", "content": "..."}]}\n\n'
-                f"Previous response:\n{final_content}"
-            )},
-        ]
-        retry_resp = llm.chat(retry_messages, profile=phase2_profile)
-        retry_content = retry_resp.get("content", "")
-        phase2_retry = _parse_phase2(retry_content)
-        if not (phase2_retry["suggestions"] and phase2_retry["suggestions"][0].startswith("LLM response parse failed:")):
-            phase2 = phase2_retry
-            _console.print("  [green]✓ JSON retry succeeded[/green]")
-        else:
-            _console.print("  [red]✗ JSON retry also failed — using parse-failure result[/red]")
-
     _print_phase2(phase2)
 
     # Phase 2 파일 쓰기 (파일 수정 제안이 있는 경우)
@@ -344,6 +330,7 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
             **state.get("verification", {}),
             "passed": False,  # Phase 1 failed → always False → 그래프 자가 루프
             "stage": "runtime",
+            "failure_source": phase2.get("failure_source", "implementation"),
             "runtime_phase1": phase1,
             "runtime_phase2": phase2_for_state,
             "log_dir": log_dir_base,

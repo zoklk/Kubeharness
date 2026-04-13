@@ -14,10 +14,7 @@ from harness.llm import client as llm
 
 _console = Console()
 
-
-# Anthropic server-side built-in tools: executed by Anthropic, not the client.
-# Sending any tool_result content — the API substitutes real results on its side.
-_ANTHROPIC_SERVER_SIDE_TOOLS = {"web_search"}
+_TOOL_RESULT_MAX_CHARS = 3000  # read_file 제외한 모든 tool 결과 최대 길이 (끝 N자 유지)
 
 
 async def _execute_tools_parallel(
@@ -27,15 +24,14 @@ async def _execute_tools_parallel(
 ) -> list[tuple[dict, str]]:
     """LLM이 요청한 tool_calls를 asyncio.gather로 병렬 실행."""
     async def _exec_one(tc: dict) -> tuple[dict, str]:
-        if tc["name"] in _ANTHROPIC_SERVER_SIDE_TOOLS:
-            # Anthropic이 서버에서 실행하는 built-in 툴 — 클라이언트는 빈 결과만 반환.
-            # "Unknown tool" 문자열을 모델에게 보내면 무한 재시도 루프 발생.
-            return tc, ""
         tool = tool_map.get(tc["name"])
         if tool is None:
             return tc, f"Unknown tool: {tc['name']}"
         try:
-            return tc, str(await asyncio.wait_for(tool.ainvoke(tc["input"]), timeout=tool_timeout))
+            result = str(await asyncio.wait_for(tool.ainvoke(tc["input"]), timeout=tool_timeout))
+            if tc["name"] != "read_file" and len(result) > _TOOL_RESULT_MAX_CHARS:
+                result = result[-_TOOL_RESULT_MAX_CHARS:]
+            return tc, result
         except asyncio.TimeoutError:
             return tc, f"Tool timed out after {tool_timeout}s"
         except Exception as e:

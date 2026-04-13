@@ -208,11 +208,28 @@ def _handle_runtime_interrupt(
 
     # fail
     at_limit = runtime_retry_count >= max_runtime_retries
+    failure_source = v.get("failure_source", "implementation")
+    is_smoke_test_bug = failure_source == "smoke_test"
 
     console.print(Panel(
         f"[red bold]검증 실패[/red bold]  (runtime_retry={runtime_retry_count})",
         border_style="red",
     ))
+
+    # smoke_test 버그로 진단된 경우 — --skip-interrupt여도 강제 개입
+    if is_smoke_test_bug:
+        console.print(
+            "[red bold]⚠ Phase 2 진단: smoke test 자체의 버그[/red bold]\n"
+            "[yellow]자동 재시도를 중단합니다. smoke test를 수동으로 수정하세요.[/yellow]"
+        )
+        for sug in (v.get("runtime_phase2") or {}).get("suggestions", []):
+            console.print(f"  [yellow]→ {escape(sug)}[/yellow]")
+        choice = _prompt(
+            "smoke test 수정 후 재시도하려면 'continue', 중단하려면 Enter/'abort': "
+        ).strip()
+        if choice.lower() == "continue":
+            return True, ""
+        return False, ""
 
     if at_limit:
         console.print(

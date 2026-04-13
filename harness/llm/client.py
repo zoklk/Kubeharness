@@ -187,7 +187,7 @@ def _chat_anthropic(
         ]
 
     retryable = (anthropic.APIConnectionError, anthropic.APITimeoutError)
-    raw = _retry(lambda: client.messages.create(**kwargs), retryable)
+    raw = _retry(lambda: client.messages.create(**kwargs), retryable, rate_limit_exc=anthropic.RateLimitError)
 
     # 토큰 사용량 로깅 (캐싱 활성 프로파일에서만 출력)
     if cfg.get("prompt_caching"):
@@ -387,14 +387,32 @@ def _chat_gemini(
     }
 
 
-def _retry(fn, retryable: tuple, max_attempts: int = 3):
-    """네트워크 에러만 재시도. JSON 파싱 실패 등 로직 에러는 즉시 raise."""
+def _retry(fn, retryable: tuple, max_attempts: int = 3, rate_limit_exc=None):
+    """네트워크 에러 재시도. rate_limit_exc 지정 시 429를 별도 긴 대기로 재시도."""
+    _RL_MAX = 5
+    _RL_DELAY_BASE = 60.0  # 429는 1분 단위 토큰 한도이므로 60s 기본 대기
+
     delay = 1.0
-    for attempt in range(max_attempts):
+    rl_count = 0
+    attempt = 0
+    while True:
         try:
             return fn()
-        except retryable:
-            if attempt == max_attempts - 1:
+        except Exception as e:
+            if rate_limit_exc and isinstance(e, rate_limit_exc):
+                rl_count += 1
+                if rl_count > _RL_MAX:
+                    raise
+                wait = _RL_DELAY_BASE * rl_count
+                _console.print(
+                    f"  [yellow]⚠ 429 rate limit — {wait:.0f}s 후 재시도 ({rl_count}/{_RL_MAX})[/yellow]"
+                )
+                time.sleep(wait)
+            elif isinstance(e, retryable):
+                if attempt >= max_attempts - 1:
+                    raise
+                time.sleep(delay)
+                delay *= 2
+                attempt += 1
+            else:
                 raise
-            time.sleep(delay)
-            delay *= 2
