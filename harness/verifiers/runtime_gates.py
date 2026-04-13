@@ -127,31 +127,6 @@ def _terminal_detail(pods_r: dict) -> str:
     return "; ".join(parts[:3])
 
 
-# ── StatefulSet stale revision 감지 ──────────────────────────────────────────
-
-def _detect_stale_statefulset_revision(service_name: str, namespace: str) -> bool:
-    """StatefulSet updateRevision과 실제 pod revision이 다르면 True."""
-    r_sts = shell.run(["kubectl", "get", "statefulset", service_name, "-n", namespace, "-o", "json"])
-    if r_sts["exit_code"] != 0:
-        return False  # StatefulSet 아님
-    try:
-        sts = json.loads(r_sts["stdout"])
-    except (json.JSONDecodeError, ValueError):
-        return False
-    update_rev = sts.get("status", {}).get("updateRevision", "")
-    if not update_rev:
-        return False
-
-    r_pods = kubectl.get_pods(namespace, label=label_selector(service_name))
-    if r_pods["exit_code"] != 0:
-        return False
-    pods = json.loads(r_pods["stdout"]).get("items", [])
-    return any(
-        p.get("metadata", {}).get("labels", {}).get("controller-revision-hash", "") != update_rev
-        for p in pods
-    )
-
-
 # ── 메인 게이트 함수 ──────────────────────────────────────────────────────────
 
 def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, log_dir: Optional[str] = None) -> dict:
@@ -221,28 +196,12 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
     if has_helm:
         vf = values_files(chart_path)
 
-        # terminal 상태 pod만 선제 삭제: CrashLoopBackOff back-off 축적 pod가 rolling update를 막는 것을 방지
-        # 정상 Running pod를 강제 삭제하면 EMQX 등 agent mode 전환 재시작 사이클이 반복됨
-        _pods_before = kubectl.get_pods(NAMESPACE, label=lsel)
-        if _is_terminal_failure(_pods_before):
-            kubectl.delete_pods(NAMESPACE, lsel)
+        # 항상 uninstall 후 install (release not found는 정상 — 무시)
+        uninstall_r = helm.uninstall(rname, NAMESPACE)
+        if uninstall_r["exit_code"] == 0:
+            checks.append(_from_run("helm_uninstall", uninstall_r, log_dir))
 
-        # immutable field 감지 시 uninstall 후 재설치
-        # "immutable": generic k8s field, "forbidden: updates to statefulset spec": PVC/volumeClaimTemplates 변경
         r = helm.upgrade_install(rname, chart_path, NAMESPACE, vf)
-        output_lower = (r["stderr"] + r["stdout"]).lower()
-        if r["exit_code"] != 0 and (
-            "immutable" in output_lower
-            or ("forbidden" in output_lower and "statefulset spec" in output_lower)
-        ):
-            uninstall_r = helm.uninstall(rname, NAMESPACE)
-            uninstall_check = _from_run("helm_uninstall_immutable", uninstall_r, log_dir)
-            checks.append(uninstall_check)
-            if uninstall_check["status"] == "fail":
-                checks += [_skip("helm_install"), _skip("kubectl_wait"), _skip("smoke_test")]
-                return {"passed": False, "checks": checks}
-            r = helm.upgrade_install(rname, chart_path, NAMESPACE, vf)
-
         checks.append(_from_run("helm_install", r, log_dir))
         if checks[-1]["status"] == "fail":
             checks += [_skip("kubectl_wait"), _skip("smoke_test")]
@@ -263,19 +222,7 @@ def run_runtime_phase1(service_name: str, sub_goal_name: str, phase_name: str, l
                                       log_dir, r60["stdout"] + r60["stderr"]))
             else:
                 r240 = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="240s")
-                if r240["exit_code"] == 0:
-                    checks.append(_from_run("kubectl_wait", r240, log_dir))
-                else:
-                    r_pods_after = kubectl.get_pods(NAMESPACE, label=lsel)
-                    if (
-                        not _is_terminal_failure(r_pods_after)
-                        and _detect_stale_statefulset_revision(service_name, NAMESPACE)
-                    ):
-                        shell.run(["kubectl", "rollout", "restart", f"statefulset/{service_name}", "-n", NAMESPACE])
-                        r_restart = kubectl.wait("pods", "Ready", NAMESPACE, label=lsel, timeout="300s")
-                        checks.append(_from_run("rollout_restart_recovery", r_restart, log_dir))
-                    else:
-                        checks.append(_from_run("kubectl_wait", r240, log_dir))
+                checks.append(_from_run("kubectl_wait", r240, log_dir))
 
         if checks[-1]["status"] == "fail":
             checks.append(_skip("smoke_test"))

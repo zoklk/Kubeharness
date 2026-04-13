@@ -27,6 +27,7 @@ class HarnessState(TypedDict, total=False):
 
     # 이력
     error_count: int
+    runtime_retry_count: int  # runtime_verifier 자가 루프 재시도 횟수 (error_count와 독립)
 
     # 사람 추가 지시 (developer interrupt에서 입력, developer_node가 user message에 포함 후 소거)
     user_hint: Optional[str]

@@ -5,11 +5,12 @@ Phase 1 (결정적 게이트):
     run_runtime_phase1() → helm install, kubectl wait, smoke test
 
 Phase 2 (LLM 진단) — Phase 1 fail 시에만 실행:
-    kagent read-only tool로 실패 원인 진단
-    {"passed": false, "observations": [...], "suggestions": [...]}
+    kagent read-only tool + ReadFileTool로 실패 원인 진단 + 파일 수정
+    {"passed": false, "observations": [...], "suggestions": [...], "files": [...]}
 
 Phase 1 pass → Phase 2 skip, verification.passed=True (smoke test 포함 전부 통과)
 Phase 1 fail → Phase 2 진단 실행, verification.passed=False (항상)
+             → phase2.files 비어 있지 않으면 파일 쓰기 → 그래프가 자가 루프
 """
 
 import asyncio
@@ -22,14 +23,15 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from harness.config import NAMESPACE, PROJECT_ROOT, build_cluster_env_section
+from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
 from harness.llm import client as llm
-from harness.llm.artifacts import scan_service_files
+from harness.llm.artifacts import scan_service_files, write_files as _shared_write_files
 from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
 from harness.state import HarnessState
+from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
 from harness.verifiers import node_log_dir
 from harness.verifiers.runtime_gates import run_runtime_phase1
 
@@ -56,6 +58,8 @@ def _print_phase2(phase2: dict) -> None:
         _console.print(f"  [dim]{escape(obs.get('area',''))}[/dim]: {escape(obs.get('finding',''))}")
     for sug in phase2.get("suggestions", []):
         _console.print(f"  [yellow]→ {escape(sug)}[/yellow]")
+    if phase2.get("files"):
+        _console.print(f"  [cyan]→ {len(phase2['files'])} file(s) to write[/cyan]")
 
 
 _CONTEXT_DIR = PROJECT_ROOT / "context"
@@ -68,8 +72,11 @@ _DEFAULT_SYSTEM_PROMPT = (
     "Use the available tools to investigate the root cause "
     "(pod logs, events, describe resources), then respond ONLY with "
     "valid JSON matching this schema exactly:\n"
-    '{"passed": false, "observations": [{"area": str, "finding": str}], "suggestions": [str]}\n'
+    '{"passed": false, "observations": [{"area": str, "finding": str}], "suggestions": [str], '
+    '"files": [{"path": "edge-server/...", "content": "full file content"}]}\n'
     "passed must always be false. Focus on actionable fix suggestions. "
+    "files is optional — include only when you need to modify files to fix the issue. "
+    "Use read_file tool to check current file content before writing. "
     "Do not include any text outside the JSON object."
 )
 
@@ -92,6 +99,11 @@ async def _load_tools() -> tuple[list, list[dict]]:
     except Exception as e:
         _console.print(f"  [yellow]⚠ kagent tools unavailable (runtime_verifier): {e}[/yellow]")
         return [], []
+
+
+def _write_files(files: list[dict]) -> tuple[list[str], str | None]:
+    """artifacts.write_files 위임."""
+    return _shared_write_files(files, console=_console)
 
 
 def _artifact_files_listing(service_name: str) -> str:
@@ -146,6 +158,7 @@ def _parse_phase2(content: str) -> dict:
                     "passed": bool(data.get("passed", False)),
                     "observations": data.get("observations", []),
                     "suggestions": data.get("suggestions", []),
+                    "files": data.get("files", []),
                 }
         except (json.JSONDecodeError, ValueError):
             continue
@@ -154,71 +167,38 @@ def _parse_phase2(content: str) -> dict:
         "passed": False,
         "observations": [],
         "suggestions": [f"LLM response parse failed: {content[:300]}"],
+        "files": [],
     }
 
 
-_MAX_FINDINGS_PER_SUBGOAL = 3
-
-
-def _trim_findings(text: str, sub_goal_name: str) -> str:
-    """동일 sub_goal 항목을 최대 (_MAX_FINDINGS_PER_SUBGOAL - 1)개만 남긴다 (새 항목 추가 공간 확보)."""
-    entries = re.split(r'(?=^## )', text, flags=re.MULTILINE)
-    entries = [e for e in entries if e.strip()]
-
-    same = [e for e in entries if f"| sub_goal: {sub_goal_name}" in e]
-    other = [e for e in entries if f"| sub_goal: {sub_goal_name}" not in e]
-
-    kept = same[-(_MAX_FINDINGS_PER_SUBGOAL - 1):]
-    return "".join(other + kept)
-
-
-def _save_llm_findings(technology_name: str, phase2: dict, sub_goal_name: str, phase_name: str) -> None:
-    """
-    Phase 2 LLM 진단 결과를 context/knowledge/<technology_name>-llm-findings.md 에 append.
-    observations + suggestions 모두 비어 있으면 skip.
-    suggestions가 모두 이미 파일에 존재하면 중복으로 skip.
-    """
-    observations: list[dict] = phase2.get("observations", [])
-    suggestions: list[str] = phase2.get("suggestions", [])
-
-    if not observations and not suggestions:
-        return
-
-    knowledge_dir = _CONTEXT_DIR / "knowledge"
-    findings_path = knowledge_dir / f"{technology_name}-llm-findings.md"
-    knowledge_dir.mkdir(parents=True, exist_ok=True)
-
-    existing_text = findings_path.read_text(encoding="utf-8") if findings_path.exists() else ""
-
-    # 중복 체크: suggestions가 모두 이미 파일에 존재하면 skip
-    if suggestions and all(sug in existing_text for sug in suggestions):
-        _console.print(
-            f"  [dim]Findings skipped (duplicate) → context/knowledge/{technology_name}-llm-findings.md[/dim]"
-        )
-        return
-
-    from datetime import date
-    date_str = date.today().isoformat()
-
-    obs_lines = "\n".join(f"- [{o.get('area', '')}] {o.get('finding', '')}" for o in observations)
-    sug_lines = "\n".join(f"- {s}" for s in suggestions)
-
-    entry = (
-        f"## {date_str} | phase: {phase_name} | sub_goal: {sub_goal_name}\n"
-        f"### Observations\n{obs_lines or '- (none)'}\n"
-        f"### Suggestions\n{sug_lines or '- (none)'}\n"
-        "---\n"
+def _build_verifier_user_message(
+    service_name: str,
+    sub_goal: dict,
+    sub_goal_spec: str,
+    phase1: dict,
+    knowledge_parts: list,
+    user_hint: str,
+) -> str:
+    content = (
+        f"Service: {service_name}\n"
+        f"Phase: {sub_goal.get('phase', '')}\n\n"
+        + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
+        + build_cluster_env_section(include_authoring_hint=False) + "\n\n"
+        + _phase1_summary(phase1)
+        + _artifact_files_listing(service_name)
+        + ("".join(f"\n\n{title}\n{c}" for title, c in knowledge_parts) if knowledge_parts else "")
+        + "\n\nPhase 1 failed. Use the available tools to diagnose the root cause "
+          "(check pod logs, events, describe resources). "
+          "When you identify a fix, **write the corrected files directly** in the `files` field: "
+          "call `read_file` first to get the current content, then include the full corrected content. "
+          "The harness will write the files and re-deploy automatically — this is a self-loop, not a handoff. "
+          "Only fall back to `suggestions` text if you genuinely cannot determine the fix. "
+          "Reference exact file paths from ## Artifact Files above. "
+          "Set passed=false in your response."
     )
-
-    trimmed = _trim_findings(existing_text, sub_goal_name)
-    findings_path.write_text(trimmed + entry, encoding="utf-8")
-
-    n_obs = len(observations)
-    n_sug = len(suggestions)
-    _console.print(
-        f"  [dim]Findings saved → context/knowledge/{technology_name}-llm-findings.md "
-        f"(+{n_obs} obs, +{n_sug} sug)[/dim]"
-    )
+    if user_hint:
+        content += f"\n\n## Additional Instructions from Operator\n{user_hint}"
+    return content
 
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────
@@ -227,13 +207,21 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     """
     LangGraph 노드. async 선언으로 asyncio.run() 중첩 없이
     상위 이벤트 루프(FastAPI, async LangGraph 워커 등)에서 안전하게 await 가능.
+
+    Phase 1 pass → END (그래프 종료)
+    Phase 1 fail → Phase 2 LLM 진단 → 파일 쓰기(있으면) → 자가 루프
     """
     sub_goal = state["current_sub_goal"]
     service_name = sub_goal.get("service_name") or sub_goal["name"]
     runtime_log_dir = node_log_dir(state, "runtime")
     log_dir_base = str(Path(runtime_log_dir).parent) + "/"
+    runtime_retry_count = state.get("runtime_retry_count", 0)
+    user_hint = state.get("user_hint", "") or ""
 
-    _console.print(f"\n[cyan]⟳[/cyan]  Runtime Verifier  [{service_name}]  Phase 1 ...")
+    _console.print(
+        f"\n[cyan]⟳[/cyan]  Runtime Verifier  [{service_name}]  Phase 1"
+        f"  (runtime_retry={runtime_retry_count}) ..."
+    )
 
     # ── Phase 1 (subprocess → to_thread으로 이벤트 루프 블로킹 방지) ──────────
     phase1 = await asyncio.to_thread(
@@ -262,37 +250,25 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     deps = extract_dependencies(sub_goal_spec)
     knowledge_parts = read_knowledge(technology_name, deps)
 
+    user_message = _build_verifier_user_message(
+        service_name, sub_goal, sub_goal_spec, phase1, knowledge_parts, user_hint
+    )
+
     messages = [
         {"role": "system", "content": _load_system_prompt()},
-        {
-            "role": "user",
-            "content": (
-                f"Service: {service_name}\n"
-                f"Phase: {sub_goal.get('phase', '')}\n\n"
-                + (f"## Sub-Goal Specification\n{sub_goal_spec}\n\n" if sub_goal_spec else "")
-                + build_cluster_env_section(include_authoring_hint=False) + "\n\n"
-                + _phase1_summary(phase1)
-                + _artifact_files_listing(service_name)
-                + ("".join(f"\n\n{title}\n{content}" for title, content in knowledge_parts) if knowledge_parts else "")
-                + "\n\nPhase 1 failed. Use the available tools to diagnose the root cause "
-                  "(check pod logs, events, describe resources). "
-                  "Identify why the deployment failed and provide actionable fix suggestions. "
-                  "Reference exact file paths and YAML keys from the Helm Chart Files list above. "
-                  "Set passed=false in your response."
-            ),
-        },
+        {"role": "user", "content": user_message},
     ]
 
     phase2_profile = get_node_profile("runtime_verifier_phase2")
     web_cfg = get_profile_cfg(phase2_profile).get("web_search", {})
-    error_count = state.get("error_count", 0)
 
-    web_search_active = bool(
-        web_cfg
-        and error_count >= web_cfg.get("trigger_error_count", 2)
-    )
+    # web_search: web_cfg 존재 시 항상 활성화 (error_count 조건 제거)
+    web_search_active = bool(web_cfg)
 
     tool_objs, tools_dicts = await _load_tools()
+    # ReadFileTool 추가: Phase 2 LLM이 파일 수정 전 현재 내용을 읽을 수 있도록
+    tool_objs = [*tool_objs, ReadFileTool()]
+    tools_dicts = [*tools_dicts, read_file_tool_dict()]
 
     if web_search_active:
         tools_dicts = tools_dicts + [{
@@ -300,12 +276,11 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
             "name": "web_search",
             "max_uses": web_cfg.get("max_uses", 5),
         }]
-        # user message 끝에 가설 기반 웹검색 지시 추가
         messages[-1]["content"] += (
             "\n\n## Web Search Instructions\n"
             "Web search is now available. Before searching:\n"
             "1. State your hypothesis explicitly: what you believe is the root cause and why.\n"
-            "2. Use web_search to validate or refute the hypothesis with up-to-date sources (prioritize 2025-2026).\n"
+            "2. Use web_search to validate or refute the hypothesis with up-to-date sources (prioritize 2026).\n"
             "3. If the hypothesis is refuted, form a new one and search again.\n"
             "Do NOT search without a stated hypothesis first."
         )
@@ -324,17 +299,17 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
     # parse 실패 시 1회 retry: JSON만 요청
     if phase2["suggestions"] and phase2["suggestions"][0].startswith("LLM response parse failed:"):
         _console.print("  [yellow]⚠ Phase 2 parse failed — retrying with JSON-only request ...[/yellow]")
-        # 전체 히스토리 재전송 없이 직전 응답만 포함한 최소 컨텍스트로 retry
         retry_messages = [
             {"role": "system", "content": _load_system_prompt()},
             {"role": "user", "content": (
                 "The following text is your previous diagnostic response. "
                 "Reformat it as ONLY a valid JSON object — no prose, no fences, no explanation.\n"
-                'Schema: {"passed": false, "observations": [{"area": "...", "finding": "..."}], "suggestions": ["..."]}\n\n'
+                'Schema: {"passed": false, "observations": [{"area": "...", "finding": "..."}], '
+                '"suggestions": ["..."], "files": [{"path": "edge-server/...", "content": "..."}]}\n\n'
                 f"Previous response:\n{final_content}"
             )},
         ]
-        retry_resp = llm.chat(retry_messages, profile=phase2_profile)  # tools 없음 — JSON 추출 전용
+        retry_resp = llm.chat(retry_messages, profile=phase2_profile)
         retry_content = retry_resp.get("content", "")
         phase2_retry = _parse_phase2(retry_content)
         if not (phase2_retry["suggestions"] and phase2_retry["suggestions"][0].startswith("LLM response parse failed:")):
@@ -344,20 +319,35 @@ async def runtime_verifier_node(state: HarnessState) -> dict:
             _console.print("  [red]✗ JSON retry also failed — using parse-failure result[/red]")
 
     _print_phase2(phase2)
-    _save_llm_findings(technology_name, phase2, sub_goal["name"], sub_goal.get("phase", ""))
+
+    # Phase 2 파일 쓰기 (파일 수정 제안이 있는 경우)
+    files_to_write = phase2.get("files", [])
+    if files_to_write:
+        written, write_err = _write_files(files_to_write)
+        if write_err:
+            _console.print(f"  [red]⚠ File write error: {write_err}[/red]")
+        elif written:
+            _console.print(f"  [green]✓ Phase 2 wrote {len(written)} file(s)[/green]")
+            for p in written:
+                _console.print(f"    [green]✓[/green] {p}")
+
+    # files는 state에 저장하지 않음 (bloat 방지)
+    phase2_for_state = {k: v for k, v in phase2.items() if k != "files"}
 
     return {
         "current_sub_goal": {**sub_goal, "stage": "runtime_verify"},
         "runtime_verification": {
             "runtime_phase1": phase1,
-            "runtime_phase2": phase2,
+            "runtime_phase2": phase2_for_state,
         },
         "verification": {
             **state.get("verification", {}),
-            "passed": False,  # Phase 1 failed → always False
+            "passed": False,  # Phase 1 failed → always False → 그래프 자가 루프
             "stage": "runtime",
             "runtime_phase1": phase1,
-            "runtime_phase2": phase2,
+            "runtime_phase2": phase2_for_state,
             "log_dir": log_dir_base,
         },
+        "runtime_retry_count": runtime_retry_count + 1,
+        "user_hint": "",  # 소비 — 다음 루프에 누적 방지
     }

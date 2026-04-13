@@ -18,7 +18,7 @@ from pathlib import Path
 from rich.console import Console
 
 from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
-from harness.llm.artifacts import scan_service_files
+from harness.llm.artifacts import scan_service_files, write_files as _shared_write_files
 from harness.llm.context import extract_dependencies, read_knowledge
 from harness.llm.tool_loop import run_tool_loop
 from harness.mcp.kagent_client import get_kagent_tools, tools_as_chat_dicts
@@ -131,28 +131,15 @@ def _extract_subgoal_section(phase_md: str, sub_goal_name: str) -> str:
 
 def _verification_summary(verification: dict) -> str:
     """
-    실패 체크와 LLM 제안을 정보 밀도 높게 요약.
+    static 실패 체크를 정보 밀도 높게 요약.
     pass/skip은 생략, fail만 detail 포함.
+    (runtime 실패는 runtime_verifier 자가 루프로 처리되므로 developer는 받지 않음)
     """
     lines = [f"Stage: {verification.get('stage', 'unknown')}"]
 
-    # static 또는 runtime 공통 checks
     for c in verification.get("checks", []):
         if c["status"] == "fail":
             lines.append(f"[FAIL] {c['name']}: {c['detail']}")
-
-    # runtime phase1 체크
-    for c in verification.get("runtime_phase1", {}).get("checks", []):
-        if c["status"] == "fail":
-            lines.append(f"[FAIL] runtime/{c['name']}: {c['detail']}")
-
-    # runtime phase2 LLM 관찰 및 제안
-    p2 = verification.get("runtime_phase2", {})
-    if p2 and not p2.get("passed"):
-        for obs in p2.get("observations", []):
-            lines.append(f"[OBS] {obs.get('area', '')}: {obs.get('finding', '')}")
-        for sug in p2.get("suggestions", []):
-            lines.append(f"[SUGGESTION] {sug}")
 
     return "\n".join(lines)
 
@@ -220,10 +207,6 @@ async def _load_tools() -> tuple[list, list[dict]]:
     except Exception as e:
         _console.print(f"  [yellow]⚠ kagent tools unavailable (developer): {e}[/yellow]")
         return [], []
-
-
-# ── 컨텍스트 보강 ────────────────────────────────────────────────────────────
-
 
 
 def _debug_print_context(message: str) -> None:
@@ -324,47 +307,8 @@ def _parse_artifacts(content: str) -> dict | None:
 
 
 def _write_files(files: list[dict]) -> tuple[list[str], str | None]:
-    """
-    원자성 강화 파일 쓰기.
-
-    Phase 1 — Pre-validation:
-        - prefix 위반(_ALLOWED_PREFIX 미준수) → 조용히 skip
-        - 빈 content → 조용히 skip
-        - 유효 파일만 valid_files에 수집
-
-    Phase 2 — Atomic write:
-        - valid_files를 순서대로 기록
-        - OSError(디스크 풀, 권한 문제 등) 발생 시 즉시 중단
-
-    Returns:
-        (written_paths, error_message | None)
-        error_message가 None이면 정상 완료. 아니면 Broken State 신호.
-    """
-    # Phase 1: Pre-validation
-    valid_files: list[tuple[str, str]] = []
-    for f in files:
-        path = f.get("path", "")
-        content = f.get("content", "")
-        if not path.startswith(_ALLOWED_PREFIX):
-            _console.print(f"  [red]⚠ prefix violation — dropped:[/red] {path!r}")
-            continue
-        if not content:
-            _console.print(f"  [yellow]⚠ empty content — dropped:[/yellow] {path!r}")
-            continue
-        valid_files.append((path, content))
-
-    # Phase 2: Write (검증 통과 파일만)
-    written: list[str] = []
-    for path, content in valid_files:
-        try:
-            p = PROJECT_ROOT / path
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
-            written.append(path)
-        except OSError as e:
-            return written, f"Write failed at '{path}': {e}"
-
-    return written, None
+    """artifacts.write_files 위임. 외부 동작 변경 없음."""
+    return _shared_write_files(files, allowed_prefix=_ALLOWED_PREFIX, console=_console)
 
 
 # ── 노드 함수 ──────────────────────────────────────────────────────────────────

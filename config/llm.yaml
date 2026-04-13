@@ -16,7 +16,6 @@ profiles:
     model: claude-sonnet-4-6
     temperature: 0.1
     prompt_caching: true          # 시스템 프롬프트 캐시 활성화
-    max_tool_turns: 10            # tool loop 최대 턴 (병렬 호출 전략으로 2~3턴이면 충분)
+    max_tool_turns: 5            # tool loop 최대 턴 (병렬 호출 전략으로 2~3턴이면 충분)
     web_search:
-      trigger_error_count: 2      # error_count ≥ 이 값일 때 웹검색 활성화
       max_uses: 5                 # 한 Phase 2 실행당 최대 검색 횟수

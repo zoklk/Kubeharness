@@ -519,6 +519,7 @@ def test_extract_subgoal_level1_heading():
 def test_write_files_success(tmp_path, monkeypatch):
     """정상 쓰기: 성공 경로 리스트 반환, error=None."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "apiVersion: v2"},
         {"path": "edge-server/helm/app/values.yaml", "content": "replicas: 1"},
@@ -535,6 +536,7 @@ def test_write_files_success(tmp_path, monkeypatch):
 def test_write_files_empty_content_skipped(tmp_path, monkeypatch):
     """빈 content 파일은 pre-validation에서 skip."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "apiVersion: v2"},
         {"path": "edge-server/helm/app/empty.yaml", "content": ""},  # 빈 content
@@ -548,6 +550,7 @@ def test_write_files_empty_content_skipped(tmp_path, monkeypatch):
 def test_write_files_prefix_violation_skipped(tmp_path, monkeypatch):
     """prefix 위반 경로는 pre-validation에서 skip."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "ok"},
         {"path": "harness/state.py", "content": "malicious"},
@@ -561,6 +564,7 @@ def test_write_files_prefix_violation_skipped(tmp_path, monkeypatch):
 def test_write_files_oserror_stops_loop_and_returns_error(tmp_path, monkeypatch):
     """OSError 발생 시 루프 중단, 부분 성공 목록 + 에러 메시지 반환."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "edge-server/helm/app/Chart.yaml", "content": "ok"},
         {"path": "edge-server/helm/app/values.yaml", "content": "fail_here"},
@@ -590,6 +594,7 @@ def test_write_files_oserror_stops_loop_and_returns_error(tmp_path, monkeypatch)
 def test_write_files_all_invalid_returns_empty(tmp_path, monkeypatch):
     """모든 파일이 prefix 위반 또는 빈 content이면 ([], None) 반환."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
     files = [
         {"path": "scripts/run.py", "content": "evil"},
         {"path": "edge-server/ok.yaml", "content": ""},
@@ -637,7 +642,8 @@ def test_verification_summary_static_fail():
     assert "helm_lint" not in s  # pass는 생략
 
 
-def test_verification_summary_runtime_phase1_fail():
+def test_verification_summary_only_static_checks():
+    """runtime_phase1/phase2는 요약에 포함되지 않는다 (runtime 실패는 자가 루프로 처리됨)."""
     v = {
         "passed": False,
         "stage": "runtime",
@@ -646,20 +652,8 @@ def test_verification_summary_runtime_phase1_fail():
             "passed": False,
             "checks": [
                 {"name": "helm_install", "status": "fail", "detail": "immutable field"},
-                {"name": "kubectl_wait", "status": "skip", "detail": "prior step failed"},
             ],
         },
-    }
-    s = _verification_summary(v)
-    assert "[FAIL] runtime/helm_install: immutable field" in s
-    assert "kubectl_wait" not in s  # skip은 생략
-
-
-def test_verification_summary_runtime_phase2_suggestions():
-    v = {
-        "passed": False,
-        "stage": "runtime",
-        "checks": [],
         "runtime_phase2": {
             "passed": False,
             "observations": [{"area": "logs", "finding": "OOM detected"}],
@@ -667,8 +661,10 @@ def test_verification_summary_runtime_phase2_suggestions():
         },
     }
     s = _verification_summary(v)
-    assert "[OBS] logs: OOM detected" in s
-    assert "[SUGGESTION] Increase memory limit" in s
+    # runtime details NOT included — developer never sees runtime failures
+    assert "runtime/helm_install" not in s
+    assert "OOM detected" not in s
+    assert "Increase memory limit" not in s
 
 
 # ── _extract_service_name 직접 테스트 ────────────────────────────────────────

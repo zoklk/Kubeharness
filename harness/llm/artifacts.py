@@ -1,11 +1,62 @@
 """
-LLM 컨텍스트 구성용 아티팩트 스캔 유틸리티.
+LLM 컨텍스트 구성용 아티팩트 스캔 및 쓰기 유틸리티.
 developer 노드 / runtime_verifier Phase 2에서 공유 사용.
 """
 
 from harness.config import ARTIFACT_PREFIX, PROJECT_ROOT
 
 _DEFAULT_SUBDIRS = ("helm", "manifests", "docker", "ebpf")
+
+
+def write_files(
+    files: list[dict],
+    allowed_prefix: str = ARTIFACT_PREFIX,
+    console=None,
+) -> tuple[list[str], str | None]:
+    """
+    prefix 검증 후 원자적 파일 쓰기. developer_node와 runtime_verifier_node 공용.
+
+    Phase 1 — Pre-validation:
+        - prefix 위반(allowed_prefix 미준수) → 조용히 skip
+        - 빈 content → 조용히 skip
+        - 유효 파일만 valid_files에 수집
+
+    Phase 2 — Atomic write:
+        - valid_files를 순서대로 기록
+        - OSError 발생 시 즉시 중단
+
+    Returns:
+        (written_paths, error_message | None)
+        error_message가 None이면 정상 완료.
+    """
+    from rich.console import Console as _Console
+    _con = console or _Console()
+
+    # Phase 1: Pre-validation
+    valid_files: list[tuple[str, str]] = []
+    for f in files:
+        path = f.get("path", "")
+        content = f.get("content", "")
+        if not path.startswith(allowed_prefix):
+            _con.print(f"  [red]⚠ prefix violation — dropped:[/red] {path!r}")
+            continue
+        if not content:
+            _con.print(f"  [yellow]⚠ empty content — dropped:[/yellow] {path!r}")
+            continue
+        valid_files.append((path, content))
+
+    # Phase 2: Write (검증 통과 파일만)
+    written: list[str] = []
+    for path, content in valid_files:
+        try:
+            p = PROJECT_ROOT / path
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
+            written.append(path)
+        except OSError as e:
+            return written, f"Write failed at '{path}': {e}"
+
+    return written, None
 
 
 def scan_service_files(

@@ -89,6 +89,27 @@ def _chat_anthropic(
         if m["role"] == "system":
             system = m["content"]
 
+    # prompt_caching 활성 시 intermediate tool batch 위치 사전 수집.
+    # system(1) + user_초기(1) = 이미 2개 소비 → tool batch용 남은 슬롯: 2개.
+    # 마지막 2개 intermediate batch에만 cache_control 적용 (4개 한도 초과 방지).
+    _TOOL_CACHE_SLOTS = 2
+    if cfg.get("prompt_caching"):
+        _intermediate_ends: list[int] = []  # 각 intermediate tool batch의 마지막 idx
+        _scan = 0
+        while _scan < len(non_system):
+            if non_system[_scan]["role"] == "tool":
+                _j = _scan
+                while _j < len(non_system) and non_system[_j]["role"] == "tool":
+                    _j += 1
+                if _j < len(non_system):  # intermediate (뒤에 더 있음)
+                    _intermediate_ends.append(_j - 1)
+                _scan = _j
+            else:
+                _scan += 1
+        _cacheable_ends = set(_intermediate_ends[-_TOOL_CACHE_SLOTS:])
+    else:
+        _cacheable_ends: set[int] = set()
+
     user_messages = []
     first_user_cached = False
     i = 0
@@ -108,15 +129,23 @@ def _chat_anthropic(
             user_messages.append({"role": "assistant", "content": parts or m.get("content", "")})
             i += 1
         elif m["role"] == "tool":
-            # Anthropic requires all tool_results from the same turn in a SINGLE user message
+            # Anthropic: 같은 턴의 tool_result는 하나의 user 메시지로 묶어야 함.
+            j = i
+            while j < len(non_system) and non_system[j]["role"] == "tool":
+                j += 1
             tool_results = []
-            while i < len(non_system) and non_system[i]["role"] == "tool":
+            idx = i
+            while idx < j:
+                content = non_system[idx]["content"]
+                if idx in _cacheable_ends:
+                    content = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
                 tool_results.append({
                     "type": "tool_result",
-                    "tool_use_id": non_system[i]["tool_call_id"],
-                    "content": non_system[i]["content"],
+                    "tool_use_id": non_system[idx]["tool_call_id"],
+                    "content": content,
                 })
-                i += 1
+                idx += 1
+            i = j
             user_messages.append({"role": "user", "content": tool_results})
         else:
             # prompt_caching 활성 시 첫 번째 user 메시지(대형 컨텍스트)에 cache breakpoint 추가.
@@ -149,9 +178,11 @@ def _chat_anthropic(
 
     if tools:
         # "type" 필드가 있는 항목은 Anthropic 내장 도구(web_search 등) → 그대로 전달
+        # input_schema 없으면 parameters로 폴백 (OpenAI compat 형식 호환)
         kwargs["tools"] = [
             t if "type" in t else
-            {"name": t["name"], "description": t.get("description", ""), "input_schema": t["input_schema"]}
+            {"name": t["name"], "description": t.get("description", ""),
+             "input_schema": t.get("input_schema", t.get("parameters", {}))}
             for t in tools
         ]
 
