@@ -13,6 +13,17 @@ profiles:
     tool_timeout: 60
     tool_result_max_chars: 3000
 
+  gemma-verifier:
+    provider: gemini
+    api_key_env: GEMINI_API_KEY
+    model: gemma-4-31b-it
+    temperature: 0.1
+    max_tool_turns: 5
+    tool_timeout: 60
+    tool_result_max_chars: 3000
+    web_search:
+      max_uses: 5               # tool_type은 Gemini에서 무시됨 (Google Search grounding 사용)
+
   claude-verifier:
     provider: anthropic
     api_key_env: ANTHROPIC_API_KEY

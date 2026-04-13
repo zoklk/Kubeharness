@@ -336,17 +336,30 @@ def _chat_gemini(
             contents.append(types.Content(role=role, parts=[types.Part(text=m["content"])]))
 
     # tools 변환: {"name", "description", "input_schema" or "parameters"} → FunctionDeclaration
+    # Anthropic 내장 도구 형식(type 필드 있음)은 FunctionDeclaration 변환 대상 제외:
+    #   "web_search" → types.Tool(google_search=types.GoogleSearch()) 으로 매핑
+    #   그 외 Anthropic 내장 도구는 Gemini에서 지원 안 되므로 무시
     gemini_tools = None
     if tools:
         declarations = []
+        use_google_search = False
         for t in tools:
-            schema = t.get("input_schema") or t.get("parameters") or {}
-            declarations.append(types.FunctionDeclaration(
-                name=t["name"],
-                description=t.get("description", ""),
-                parameters=schema,
-            ))
-        gemini_tools = [types.Tool(function_declarations=declarations)]
+            if "type" in t:
+                if t.get("name") == "web_search":
+                    use_google_search = True
+            else:
+                schema = t.get("input_schema") or t.get("parameters") or {}
+                declarations.append(types.FunctionDeclaration(
+                    name=t["name"],
+                    description=t.get("description", ""),
+                    parameters=schema,
+                ))
+        tool_list = []
+        if declarations:
+            tool_list.append(types.Tool(function_declarations=declarations))
+        if use_google_search:
+            tool_list.append(types.Tool(google_search=types.GoogleSearch()))
+        gemini_tools = tool_list or None
 
     gen_config = types.GenerateContentConfig(
         temperature=temperature,
