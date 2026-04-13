@@ -361,10 +361,26 @@ def _chat_gemini(
             tool_list.append(types.Tool(google_search=types.GoogleSearch()))
         gemini_tools = tool_list or None
 
+    # FunctionDeclaration + GoogleSearch 동시 사용 시 필수 옵션
+    has_declarations = any(
+        isinstance(t, types.Tool) and t.function_declarations
+        for t in (gemini_tools or [])
+    )
+    has_google_search = any(
+        isinstance(t, types.Tool) and t.google_search is not None
+        for t in (gemini_tools or [])
+    )
+    tool_config = (
+        types.ToolConfig(include_server_side_tool_invocations=True)
+        if has_declarations and has_google_search
+        else None
+    )
+
     gen_config = types.GenerateContentConfig(
         temperature=temperature,
         system_instruction=system,
         tools=gemini_tools,
+        tool_config=tool_config,
     )
 
     from google.genai.errors import ServerError as GeminiServerError

@@ -1,7 +1,7 @@
 # 각 노드가 사용할 프로파일 이름 매핑
 node_profiles:
   developer: default
-  runtime_verifier_phase2: claude-verifier
+  runtime_verifier_phase2: gemma-verifier
 
 profiles:
   default:
