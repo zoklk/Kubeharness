@@ -1,3 +1,0 @@
-# 컨테이너 이미지 빌드 설정
-registry: ghcr.io/zoklk
-image_tag: dev-v1                # 개발 환경 이미지 태그

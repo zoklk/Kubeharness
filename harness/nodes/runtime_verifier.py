@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
+from harness.config import ARTIFACT_PREFIX, HARNESS_ROOT, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
 from harness.llm import client as llm
 from harness.llm.artifacts import scan_service_files, write_files as _shared_write_files
 from harness.llm.client import get_node_profile, get_profile_cfg
@@ -61,8 +61,7 @@ def _print_phase2(phase2: dict) -> None:
         _console.print(f"  [cyan]→ {len(phase2['files'])} file(s) to write[/cyan]")
 
 
-_CONTEXT_DIR = PROJECT_ROOT / "context"
-_PROMPT_PATH = _CONTEXT_DIR / "prompts" / "runtime_verifier_prompt.md"
+_PROMPT_PATH = HARNESS_ROOT / "context" / "prompts" / "runtime_verifier_prompt.md"
 _MAX_TOOL_TURNS = 5
 
 _PHASE2_SCHEMA = (

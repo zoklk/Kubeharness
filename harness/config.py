@@ -3,11 +3,17 @@
 config/cluster.yaml의 active 환경 설정을 읽어 반환.
 """
 
+import os
 from pathlib import Path
 import yaml
 
-# 프로젝트 루트 — 하네스 전체에서 공유 (harness/config.py → harness/ → GikView/)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# HARNESS_ROOT: harness 코드가 있는 디렉터리 (harness/config.py → harness/ → GikView/)
+HARNESS_ROOT = Path(__file__).resolve().parent.parent
+
+# PROJECT_ROOT: 프로젝트 파일이 있는 디렉터리
+# HARNESS_PROJECT_DIR 환경변수로 오버라이드 가능, 기본값은 sibling workspace/
+_env = os.environ.get("HARNESS_PROJECT_DIR", "")
+PROJECT_ROOT = Path(_env) if _env else HARNESS_ROOT.parent / "workspace"
 
 _CONFIG_PATH = PROJECT_ROOT / "config" / "cluster.yaml"
 
@@ -47,8 +53,8 @@ def _parse() -> tuple[dict, str]:
 # 모듈 로드 시 YAML 1회만 파싱
 _raw, _active = _parse()
 
-# cluster.yaml 최상위 namespace 필드. 없으면 "gikview" 고정.
-NAMESPACE: str = _raw.get("namespace", "gikview")
+# cluster.yaml 최상위 namespace 필드. 없으면 "custom" 고정.
+NAMESPACE: str = _raw.get("namespace", "custom")
 _cluster: dict = {**_DEFAULTS, **_raw.get(_active, {}), "_active": _active}
 _kubeconfig: str | None = (
     str(Path(p).expanduser())

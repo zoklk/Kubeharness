@@ -16,7 +16,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from harness.config import ARTIFACT_PREFIX, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
+from harness.config import ARTIFACT_PREFIX, HARNESS_ROOT, NAMESPACE, PROJECT_ROOT, build_cluster_env_section
 from harness.llm.artifacts import scan_service_files, write_files as _shared_write_files
 from harness.llm.client import get_node_profile, get_profile_cfg
 from harness.llm.context import extract_dependencies, read_knowledge
@@ -28,8 +28,8 @@ from harness.tools.local_tools import ReadFileTool, read_file_tool_dict
 
 _console = Console()
 
-_CONTEXT_DIR = PROJECT_ROOT / "context"
-_PROMPT_PATH = _CONTEXT_DIR / "prompts" / "developer_prompt.md"
+_CONTEXT_DIR = PROJECT_ROOT / "context"          # base/, phases/ (프로젝트)
+_PROMPT_PATH = HARNESS_ROOT / "context" / "prompts" / "developer_prompt.md"  # harness
 _ALLOWED_PREFIX = ARTIFACT_PREFIX
 _MAX_TOOL_TURNS = 5
 

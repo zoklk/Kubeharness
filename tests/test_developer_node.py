@@ -30,6 +30,7 @@ def _isolate_project_root(tmp_path, monkeypatch):
     """developer_node / _write_files 가 실제 프로젝트 디렉토리에 파일을 쓰지 않도록
     PROJECT_ROOT 를 tmp_path 로 격리한다. 모든 테스트에 자동 적용."""
     monkeypatch.setattr("harness.nodes.developer.PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr("harness.nodes.developer.HARNESS_ROOT", tmp_path)
     monkeypatch.setattr("harness.llm.artifacts.PROJECT_ROOT", tmp_path)
 
 

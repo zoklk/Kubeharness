@@ -5,9 +5,9 @@ from typing import Any
 
 from rich.console import Console
 
-from harness.config import PROJECT_ROOT
+from harness.config import HARNESS_ROOT
 
-_CONFIG_PATH = PROJECT_ROOT / "config" / "llm.yaml"
+_CONFIG_PATH = HARNESS_ROOT / "config" / "llm.yaml"
 _console = Console()
 
 
