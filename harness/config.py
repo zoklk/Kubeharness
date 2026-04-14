@@ -16,9 +16,22 @@ _env = os.environ.get("HARNESS_PROJECT_DIR", "")
 PROJECT_ROOT = Path(_env) if _env else HARNESS_ROOT.parent / "workspace"
 
 _CONFIG_PATH = PROJECT_ROOT / "config" / "cluster.yaml"
+_BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
 
-# 컨벤션 상수 — 하네스 전체에서 공유
-ARTIFACT_PREFIX = "edge-server/"  # Developer가 쓸 수 있는 경로 prefix
+
+def _parse_build() -> dict:
+    if not _BUILD_CONFIG_PATH.exists():
+        return {}
+    try:
+        return yaml.safe_load(_BUILD_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+
+_build = _parse_build()
+
+# artifact_prefix: 프로젝트별 아티팩트 루트 경로. build.yaml에서 읽음.
+ARTIFACT_PREFIX: str = _build.get("artifact_prefix", "edge-server/")
 
 
 def release_name(service_name: str) -> str:

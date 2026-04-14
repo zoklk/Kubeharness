@@ -69,7 +69,7 @@ _PHASE2_SCHEMA = (
     '"failure_source": "implementation"|"smoke_test"|"environment", '
     '"observations": [{"area": "...", "finding": "..."}], '
     '"suggestions": ["..."], '
-    '"files": [{"path": "edge-server/...", "content": "..."}]}'
+    f'"files": [{{"path": "{ARTIFACT_PREFIX}...", "content": "..."}}]}}'
 )
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -98,6 +98,7 @@ def _load_system_prompt() -> str:
     if _PROMPT_PATH.exists():
         content = _PROMPT_PATH.read_text(encoding="utf-8").strip()
         content = content.replace("{NAMESPACE}", NAMESPACE)
+        content = content.replace("{ARTIFACT_PREFIX}", ARTIFACT_PREFIX)
         return content if content else _DEFAULT_SYSTEM_PROMPT
     return _DEFAULT_SYSTEM_PROMPT
 

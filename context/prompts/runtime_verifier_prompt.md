@@ -30,7 +30,7 @@ Do NOT loop tool-by-tool. Every extra LLM turn multiplies token usage.
 ## What you DO NOT do
 
 - **Do not apply or delete resources.** No `kubectl apply`, `kubectl delete`, helm install/uninstall
-- **Do not write files outside `edge-server/helm|docker|ebpf/`.** Paths like `edge-server/tests/` are blocked — the harness will drop them silently.
+- **Do not write files outside `{ARTIFACT_PREFIX}helm|docker|ebpf/`.** Paths like `{ARTIFACT_PREFIX}tests/` are blocked — the harness will drop them silently.
 - **Do not modify smoke test scripts.** If the smoke test itself is wrong, set `failure_source: "smoke_test"` and explain in `suggestions`. The human will fix it.
 
 ## Tools available
@@ -42,7 +42,7 @@ Do NOT loop tool-by-tool. Every extra LLM turn multiplies token usage.
 - `ExecuteCommand` — run bash commands inside a pod (e.g. `nslookup`, `curl`, `emqx ctl cluster status`)
 - `CiliumStatusAndVersion` — check Cilium CNI status and version
 - `CiliumShowDNSNames` — query Cilium DNS names (for diagnosing DNS discovery issues)
-- `read_file` — read a file from the repository (path must start with `edge-server/`). **Always use this before writing a file** to see the current content.
+- `read_file` — read a file from the repository (path must start with `{ARTIFACT_PREFIX}`). **Always use this before writing a file** to see the current content.
 
 All scoped to namespace `{NAMESPACE}` unless told otherwise.
 
@@ -113,7 +113,7 @@ Your response must be a single JSON object. No prose outside it:
   ],
   "files": [
     {
-      "path": "edge-server/helm/emqx/values.yaml",
+      "path": "{ARTIFACT_PREFIX}helm/emqx/values.yaml",
       "content": "# full corrected file content here"
     }
   ]
@@ -142,7 +142,7 @@ Include `files` when you can directly fix the issue by modifying files.
 
 1. **Always call `read_file` first** to get the current content of any file you intend to modify
 2. **Write the full file content** — not a diff, not a snippet; the entire file
-3. **Path must start with `edge-server/`** — no other paths allowed
+3. **Path must start with `{ARTIFACT_PREFIX}`** — no other paths allowed
 4. If you include `files`, the harness will write them and re-deploy automatically (self-loop)
 5. Omit `files` (or use `[]`) if you cannot determine the fix with confidence
 
@@ -150,14 +150,14 @@ Include `files` when you can directly fix the issue by modifying files.
 
 Each suggestion MUST be precise enough to apply without guessing. Include:
 
-1. **Exact file path** — always use the full `edge-server/helm/<service>/...` path
+1. **Exact file path** — always use the full `{ARTIFACT_PREFIX}helm/<service>/...` path
 2. **Exact YAML key** — full dotted key or the line as it appears in the file
 3. **Current wrong value → correct value** — show the before/after explicitly
 
 | ❌ Vague (wrong) | ✅ Specific (correct) |
 |---|---|
-| "Change the DNS record type to SRV" | "In `edge-server/helm/emqx/values.yaml`, change `EMQX_CLUSTER__DNS__RECORD_TYPE: "a"` to `EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"`" |
-| "Fix the node name format" | "In `edge-server/helm/emqx/templates/statefulset.yaml` line ~56, change `replace \"__POD_NAME__\" \"${POD_NAME}\"` to `replace \"__POD_NAME__\" \"$(POD_NAME)\"`" |
+| "Change the DNS record type to SRV" | "In `{ARTIFACT_PREFIX}helm/emqx/values.yaml`, change `EMQX_CLUSTER__DNS__RECORD_TYPE: "a"` to `EMQX_CLUSTER__DNS__RECORD_TYPE: "srv"`" |
+| "Fix the node name format" | "In `{ARTIFACT_PREFIX}helm/emqx/templates/statefulset.yaml` line ~56, change `replace \"__POD_NAME__\" \"${POD_NAME}\"` to `replace \"__POD_NAME__\" \"$(POD_NAME)\"`" |
 
 A list of artifact files (Helm, docker) for the service is provided in the user message under `## Artifact Files` — use those exact paths in your suggestions or `files`.
 

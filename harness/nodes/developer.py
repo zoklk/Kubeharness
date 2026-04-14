@@ -34,7 +34,7 @@ _ALLOWED_PREFIX = ARTIFACT_PREFIX
 _MAX_TOOL_TURNS = 5
 
 _ARTIFACT_SCHEMA = (
-    '{"files": [{"path": "edge-server/helm/<svc>/...", "content": "..."}], '
+    f'{{"files": [{{"path": "{ARTIFACT_PREFIX}helm/<svc>/...", "content": "..."}}], '
     '"notes": "..."}'
 )
 
@@ -55,6 +55,7 @@ def _load_system_prompt() -> str:
     if _PROMPT_PATH.exists():
         content = _PROMPT_PATH.read_text(encoding="utf-8").strip()
         content = content.replace("{NAMESPACE}", NAMESPACE)
+        content = content.replace("{ARTIFACT_PREFIX}", ARTIFACT_PREFIX)
         return content if content else _DEFAULT_SYSTEM_PROMPT
     return _DEFAULT_SYSTEM_PROMPT
 

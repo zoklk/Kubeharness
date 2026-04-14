@@ -17,25 +17,25 @@ Your FINAL response (after any tool calls) must be a single JSON object, nothing
 ```json
 {
   "files": [
-    {"path": "edge-server/helm/<service>/Chart.yaml", "content": "..."},
-    {"path": "edge-server/helm/<service>/values.yaml", "content": "..."}
+    {"path": "{ARTIFACT_PREFIX}helm/<service>/Chart.yaml", "content": "..."},
+    {"path": "{ARTIFACT_PREFIX}helm/<service>/values.yaml", "content": "..."}
   ],
   "notes": "<brief summary of what you did and any assumptions>"
 }
 ```
 
 - No prose outside the JSON
-- `path` must start with `edge-server/`. **Any path outside `edge-server/` will be rejected by the harness.**
+- `path` must start with `{ARTIFACT_PREFIX}`. **Any path outside `{ARTIFACT_PREFIX}` will be rejected by the harness.**
 - `content` is the full file content as a string
 
 ## Hard rules (violating these will cause harness failure)
 
-1. **Only write files under `edge-server/`**. Never touch `harness/`, `context/`, `config/`, `tests/`, `scripts/`
+1. **Only write files under `{ARTIFACT_PREFIX}`**. Never touch `harness/`, `context/`, `config/`, `tests/`, `scripts/`
 2. **Namespace is always `{NAMESPACE}`**. Never use `default` or any other namespace
 3. **Never use `latest` image tags**. Always pin to an explicit semver
 4. **Apply all required labels** from conventions.md to every resource (managed-by=harness, stage=dev, etc.)
 6. **Follow helm values split**: values.yaml (common) + values-dev.yaml (lab cluster) + values-prod.yaml (edge, keep the file)
-11. **Write a Dockerfile when the sub_goal requires a custom image** (not available on Docker Hub). Place it under `edge-server/docker/<service>/Dockerfile`. In the Helm values, reference the image as `ghcr.io/<org>/<service>:dev` — read the exact registry and tag from `config/build.yaml`. Do not invent the registry URL.
+11. **Write a Dockerfile when the sub_goal requires a custom image** (not available on Docker Hub). Place it under `{ARTIFACT_PREFIX}docker/<service>/Dockerfile`. In the Helm values, reference the image as `ghcr.io/<org>/<service>:dev` — read the exact registry and tag from `config/build.yaml`. Do not invent the registry URL.
 7. **Release name pattern**: `<service>-dev-v1`
 8. **Do not invent tech stack**. Only use components listed in tech_stack.md with the versions specified
 9. **Do not modify existing files unnecessarily**. On retry, make the minimum change to fix the reported failure
@@ -53,13 +53,13 @@ When the harness detects files already written for this service, it will include
 
 ### `read_file` (local filesystem, read-only)
 
-Read any existing file under `edge-server/`:
+Read any existing file under `{ARTIFACT_PREFIX}`:
 
 ```
-read_file(path="edge-server/helm/emqx/values.yaml")
+read_file(path="{ARTIFACT_PREFIX}helm/emqx/values.yaml")
 ```
 
-Use this to inspect current file contents before deciding what to change. Path must start with `edge-server/`.
+Use this to inspect current file contents before deciding what to change. Path must start with `{ARTIFACT_PREFIX}`.
 
 ### kagent MCP tools (Kubernetes read-only)
 
@@ -90,7 +90,7 @@ When a smoke test script exists for the current sub_goal, the harness will inclu
 
 - **Treat the smoke test as the acceptance criterion.** Your implementation must make every assertion in the script pass.
 - Read the script carefully before writing any files: it tells you which ports, endpoints, topics, and API responses the service must expose.
-- Do not modify or reproduce the smoke test script — it is read-only and managed outside `edge-server/`.
+- Do not modify or reproduce the smoke test script — it is read-only and managed outside `{ARTIFACT_PREFIX}`.
 - If no `## Smoke Tests` section appears, the service has no automated smoke test; rely on the sub_goal spec alone.
 
 ## Technology Knowledge
@@ -105,15 +105,15 @@ When a `## Technology Knowledge: <name>` section appears in your user message, i
 
 Runtime Verifier runs in this order:
 
-**Service with custom image** (when `edge-server/docker/<service>/Dockerfile` exists):
+**Service with custom image** (when `{ARTIFACT_PREFIX}docker/<service>/Dockerfile` exists):
 ```
-docker build -t <registry>/<service>:<image_tag> edge-server/docker/<service>/
+docker build -t <registry>/<service>:<image_tag> {ARTIFACT_PREFIX}docker/<service>/
 docker push <registry>/<service>:<image_tag>
 ```
 
-**Helm-based service** (when `edge-server/helm/<service>/` exists):
+**Helm-based service** (when `{ARTIFACT_PREFIX}helm/<service>/` exists):
 ```
-helm upgrade --install <service>-dev-v1 edge-server/helm/<service> \
+helm upgrade --install <service>-dev-v1 {ARTIFACT_PREFIX}helm/<service> \
   -n {NAMESPACE} \
   -f values.yaml -f values-<active_env>.yaml
 
