@@ -9,6 +9,7 @@ langchain-mcp-adapters를 사용해 kagent-tools MCP 서버에서
 누락되어 서버가 요청을 거부한다.
 """
 
+import asyncio
 from typing import Any
 import yaml
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -58,13 +59,33 @@ async def load_node_tools(group_name: str, node_name: str, console=None) -> tupl
         console: Rich Console 인스턴스 (없으면 새로 생성)
     """
     from rich.console import Console
+    from rich.panel import Panel
     _con = console or Console()
+
+    # URL은 에러 메시지에 표시하기 위해 미리 읽어둠
     try:
-        tool_objs = await get_kagent_tools(group_name)
+        url = _load_config().get("url", "?")
+    except Exception:
+        url = str(_CONFIG_PATH)
+
+    try:
+        tool_objs = await asyncio.wait_for(get_kagent_tools(group_name), timeout=10)
         return tool_objs, tools_as_chat_dicts(tool_objs)
+    except asyncio.TimeoutError:
+        reason = f"연결 타임아웃 (10s) — MCP 서버 미응답\n접속 시도: {url}"
+    except FileNotFoundError:
+        reason = f"kagent.yaml 없음\n경로: {_CONFIG_PATH}"
     except Exception as e:
-        _con.print(f"  [yellow]⚠ kagent tools unavailable ({node_name}): {e}[/yellow]")
-        return [], []
+        reason = f"{type(e).__name__}: {e}\n접속 시도: {url}"
+
+    _con.print(Panel(
+        f"[yellow]kagent tools를 로드하지 못했습니다.[/yellow]\n"
+        f"{reason}\n\n"
+        f"[dim]LLM은 클러스터 조회 없이 진행됩니다 (read_file 전용).[/dim]",
+        title=f"[bold yellow]⚠ kagent unavailable ({node_name})[/bold yellow]",
+        border_style="yellow",
+    ))
+    return [], []
 
 
 def tools_as_chat_dicts(tools: list) -> list[dict]:

@@ -30,11 +30,11 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
-from harness.graph import build_graph, NODE_DEVELOPER, NODE_RUNTIME_VERIFIER
-from harness.state import HarnessState
-
 from dotenv import load_dotenv  # .env 읽기
 load_dotenv()
+
+from harness.graph import build_graph, NODE_DEVELOPER, NODE_RUNTIME_VERIFIER
+from harness.state import HarnessState
 
 console = Console()
 
@@ -331,7 +331,6 @@ async def main() -> None:
         elif not snapshot.next:
             # ── 진짜 그래프 종료 (END) ────────────────────────────────────────
             console.print("\n[green bold]✓ 완료[/green bold]")
-            _print_artifacts(snapshot.values)
             break
 
         elif snapshot.next[0] == NODE_DEVELOPER:

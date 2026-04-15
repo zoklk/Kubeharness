@@ -12,6 +12,7 @@ dependencies = [
     "pydantic",
     "pyyaml",
     "rich",
+    "yamllint",
 ]
 
 [project.optional-dependencies]
