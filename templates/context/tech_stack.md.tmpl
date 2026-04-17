@@ -1,0 +1,49 @@
+# {{project_name}} — Tech stack
+
+What's in the box. Keep this current — it's the first file a new
+contributor (human or agent) reads before writing anything.
+
+## Cluster
+
+- **Kubernetes version**: TODO(init) — e.g. v1.29.x
+- **Distribution**: TODO(init) — e.g. k3s, EKS, GKE, kubeadm
+- **CNI**: TODO(init)
+- **Ingress controller**: TODO(init) — e.g. nginx, traefik
+
+## Packaging
+
+- **Helm**: v3.x. Charts live at `{{workspace_dir}}/helm/<service>/`.
+- **Container runtime**: containerd. Images pushed to
+  `conventions.registry` in `config/harness.yaml`.
+
+## Harness dependencies (checks)
+
+Installed separately; the CLI treats a missing binary as `skip`, not
+`fail`:
+
+- `yamllint` — static YAML hygiene
+- `helm` — chart lint, dry-run, template rendering
+- `kubeconform` — k8s API schema validation
+- `trivy` — chart config scan (optional)
+- `gitleaks` — secret scanning (optional)
+- `hadolint` — Dockerfile lint
+- `docker`, `kubectl` — only called by the harness CLI
+
+## Observability
+
+TODO(init): describe the logging/metrics/tracing stack your cluster
+already exposes. Agents diagnosing a failure should consult this
+section to know where to look.
+
+## Security posture
+
+TODO(init):
+- pod security standards in use (`baseline`, `restricted`)
+- any required labels/annotations
+- secret management system (external-secrets, sealed-secrets, vault)
+
+## Known constraints
+
+TODO(init): anything the harness can't help with — e.g. "deploys must
+be paused during the nightly backup window 02:00-03:00 UTC". Document
+here so agents don't discover it by failing.

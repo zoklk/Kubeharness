@@ -1,0 +1,90 @@
+---
+name: docker-author
+description: Reference for writing or modifying Dockerfiles under {{workspace_dir}}/docker/<service>/. Load before editing a Dockerfile or related build files.
+---
+
+# Docker author
+
+Read this before touching `{{workspace_dir}}/docker/<service>/Dockerfile`.
+
+## Required layout
+
+```
+{{workspace_dir}}/docker/<service>/
+├── Dockerfile              # required — detection-gate for the docker stage
+└── (app source or build context as needed)
+```
+
+`python -m harness apply --service <svc>` only runs the docker stage
+when `Dockerfile` exists at this path.
+
+## Build + push flow (handled by the CLI)
+
+The CLI assembles:
+
+```
+docker build \
+  --platform linux/<arch-from-active-env> \
+  -t <registry>/<service>:<image-tag> \
+  {{workspace_dir}}/docker/<service>
+docker push <registry>/<service>:<image-tag>
+```
+
+- `registry` ← `conventions.registry` in `config/harness.yaml`
+- `arch` ← `environments.<active>.arch`
+- `image-tag` ← `conventions.image_tag`
+
+You do not invoke docker yourself. You only write the Dockerfile.
+
+## Multi-stage template
+
+Prefer two-stage builds: a build stage with the full toolchain, and a
+minimal runtime stage that copies only the artifacts it needs.
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM alpine:3.19 AS build
+WORKDIR /src
+COPY . .
+RUN apk add --no-cache build-base && make build
+
+FROM alpine:3.19
+RUN addgroup -S app && adduser -S app -G app
+WORKDIR /app
+COPY --from=build /src/bin/service /app/service
+USER app
+EXPOSE 8080
+ENTRYPOINT ["/app/service"]
+```
+
+## hadolint rules to follow
+
+The static stage runs `hadolint <Dockerfile>`. Common fixes:
+
+- **DL3008** — pin apt/apk package versions *or* suppress explicitly.
+  For apk prefer `apk add --no-cache`; apt use
+  `apt-get install -y --no-install-recommends foo=1.2.3` plus
+  `apt-get clean && rm -rf /var/lib/apt/lists/*`.
+- **DL3002** — do not run as `root`; add a non-root user and `USER` it.
+- **DL3025** — use JSON array form for `CMD` / `ENTRYPOINT`
+  (`["/app/service"]`, not `"/app/service"`).
+- **DL3007** — avoid `latest` in `FROM`; pin a version tag or digest.
+
+## hadolint config (optional)
+
+If you must suppress a rule, add `{{workspace_dir}}/docker/<service>/.hadolint.yaml`:
+
+```yaml
+ignored:
+  - DL3008     # with a brief reason in a comment alongside
+```
+
+Do not add global suppressions to the repo root.
+
+## Registry & push
+
+- `conventions.registry` must be set and reachable by the cluster.
+- Empty string disables push (build only) — useful for smoke tests
+  but never for a real deploy.
+- The CLI does not log into the registry. Configure credentials in
+  your shell environment before running `/deploy`.

@@ -1,0 +1,68 @@
+# {{project_name}} — Conventions
+
+Static, project-wide conventions for every service deployed through
+this harness. Values live in `config/harness.yaml`; this file explains
+**why** each convention exists so contributors know when (and when
+not) to depart from it.
+
+## Source of truth
+
+`config/harness.yaml` is the single source of truth for:
+
+- `cluster.namespace` — k8s namespace for all deploys.
+- `conventions.workspace_dir` — where service artifacts live. You
+  set this via `harness init --workspace <dir>`.
+- `conventions.release_name` — default `"{service}-{active_env}-v1"`.
+  The `-{active_env}-` segment lets dev and prod coexist on one
+  cluster without collisions.
+- `conventions.label_selector` — the label every workload must carry
+  (the harness uses it for `kubectl wait` / `kubectl get pods`).
+- `conventions.image_tag` — the tag docker images are pushed under.
+  Override per service in the chart only if that service versions
+  independently.
+- `environments.<env>.arch` — the target CPU arch; the harness passes
+  it as `docker build --platform linux/<arch>`.
+
+Do not duplicate these values in chart files or Dockerfiles. Read
+them from YAML or rely on the harness to inject them.
+
+## Service layout
+
+```
+{{workspace_dir}}/
+├── helm/<service>/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   ├── values-<env>.yaml
+│   └── templates/
+├── docker/<service>/
+│   └── Dockerfile
+└── tests/<phase>/
+    └── smoke-test-<sub_goal>.sh
+```
+
+- A service must have at least one of `helm/` or `docker/` — both is
+  fine, neither is a configuration error.
+- Smoke tests are optional but recommended; they run after
+  `kubectl wait` passes.
+
+## Labels (required)
+
+```yaml
+metadata:
+  labels:
+    app.kubernetes.io/name: <service>      # == Chart.Name
+    app.kubernetes.io/instance: <release>  # == Release.Name
+    app.kubernetes.io/managed-by: Helm
+```
+
+The harness's `kubectl wait` and `kubectl get pods` queries use
+`label_selector` to target pods — no label, no wait.
+
+## Naming
+
+- Service slug: `[a-z][a-z0-9-]*`, matches the folder name under
+  `helm/`/`docker/` and the `**service_name**:` field in phase specs.
+- Release name: computed by `conventions.release_name` — never
+  hardcode.
+- Image: `<registry>/<service>:<image_tag>` — assembled by the CLI.

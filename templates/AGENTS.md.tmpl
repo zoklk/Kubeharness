@@ -1,0 +1,96 @@
+# {{project_name}} — Agent Guide
+
+Tool-neutral operating manual for any agent CLI (Claude Code, Codex CLI, …)
+working in this repo. Kubeharness-specific deterministic checks and the
+deploy pipeline live in the `python -m harness` CLI; this file tells an
+agent **when to use what**.
+
+---
+
+## Golden rules
+
+1. **Never shell out to `kubectl`, `helm`, or `docker` directly.** Always go
+   through `python -m harness <subcommand>`. The CLI owns timeouts, release
+   naming, session logging, and uninstall-before-upgrade.
+2. **Configuration is `config/harness.yaml`.** Never hardcode namespace,
+   workspace path, release name, image tag, or arch in code or skills.
+   Read the YAML at runtime.
+3. **Workspace writes only.** Code and artifacts go in `{{workspace_dir}}/`.
+   `harness/`, `.claude/`, `config/`, `context/`, `docs/` are off-limits —
+   the hook will block writes regardless.
+4. **One `/deploy` = one session log.** Every CLI invocation inside a
+   deploy cycle appends to `$HARNESS_SESSION_LOG`. Do not create ad-hoc
+   logs; they fragment the audit trail.
+5. **LLM stays out of the CLI.** No API calls from Python. LLM judgment
+   belongs to the main agent session and the two subagents below.
+
+---
+
+## Skills — load only when relevant
+
+Skills are reference documents; `Read` a skill when starting a matching
+task, forget it when done. Do **not** copy skill content into this file.
+
+| Situation | Skill |
+|---|---|
+| Writing / editing Helm charts (`Chart.yaml`, `values*.yaml`, `templates/**`) | `.claude/skills/helm-chart-author/SKILL.md` |
+| Writing / editing a `Dockerfile` | `.claude/skills/docker-author/SKILL.md` |
+| Extracting a sub_goal spec from `context/phases/<phase>.md` | `.claude/skills/phase-spec-reader/SKILL.md` |
+| Filling `values-dev.yaml` / `values-prod.yaml` from env matrix | `.claude/skills/cluster-env-inject/SKILL.md` |
+| Diagnosing a runtime failure (usually invoked by `runtime-diagnoser`) | `.claude/skills/runtime-diagnosis/SKILL.md` |
+
+---
+
+## Subagents — when to call
+
+- **`deploy-orchestrator`** — the only way to run a full deploy cycle.
+  Invoked by `/deploy <service>`. Owns the verify-static → apply →
+  verify-runtime loop with retry budget and human-approved diffs.
+- **`runtime-diagnoser`** — read-only Kubernetes diagnosis. Call via
+  `Task(subagent_type="runtime-diagnoser", prompt=...)` when:
+  - the user asks something like *"why is prometheus flaky?"*, or
+  - `deploy-orchestrator` detects a `verify-runtime` failure.
+
+Never call them from each other except in the documented direction
+(orchestrator → diagnoser).
+
+---
+
+## Workflows
+
+### New sub_goal from scratch
+
+1. Load `phase-spec-reader`, read the sub_goal section in
+   `context/phases/<phase>.md`, note the `**artifacts**:` field.
+2. Load `helm-chart-author` / `docker-author` / `cluster-env-inject` as
+   the artifacts dictate.
+3. Write `{{workspace_dir}}/helm/<service>/` and/or
+   `{{workspace_dir}}/docker/<service>/` (writes require human approval
+   per `ask` permission).
+4. Confirm with the user, then suggest `/deploy <service>`.
+
+### Iterate on an existing service
+
+1. Load the relevant author skill.
+2. Edit files under `{{workspace_dir}}/`.
+3. Run `/deploy <service>` (or `python -m harness verify-static --service <svc>`
+   if only static checks are in doubt).
+
+### Observe only
+
+User asks *"why is X misbehaving?"* → call `runtime-diagnoser` with
+`service` + `failed_stage: observe`. Do **not** modify files based on
+the response without explicit user instruction.
+
+---
+
+## CLI cheat sheet
+
+```bash
+python -m harness verify-static  --service <svc>
+python -m harness apply          --service <svc>
+python -m harness verify-runtime --service <svc> --phase <phase> --sub-goal <svc>
+```
+
+JSON envelope: `{service, stage, summary, passed, session_log, checks[]}`.
+Exit codes: `0` pass · `1` at least one fail · `2` config error.

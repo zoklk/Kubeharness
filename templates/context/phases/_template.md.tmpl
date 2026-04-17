@@ -1,0 +1,51 @@
+# Phase: <phase-name>
+
+One paragraph: what this phase delivers, and why it's a coherent
+unit of work. Copy this file to `<phase-name>.md` and fill in the
+blanks.
+
+## Sub-goal: <sub-goal-name>
+
+**service_name**: <slug>
+**technology**: <name> [<version>]
+**dependency**: [<other-sub-goal>, …] or [none]
+**artifacts**: helm, docker
+
+Short narrative describing the functional requirement for this
+sub-goal. Keep it tight — bullets beat prose. Examples:
+
+- exposes /metrics on port 9090
+- scrapes namespaces observability, my-project
+- 15-day retention, 10GB volume
+- requires ServiceMonitor CRD (depends on prometheus-operator)
+
+## Sub-goal: <next-sub-goal-name>
+
+**service_name**: ...
+**technology**: ...
+**dependency**: [<previous-sub-goal>]
+**artifacts**: helm
+
+...
+
+---
+
+## Field reference
+
+`**service_name**`
+: URL-safe slug. Must match the folder under `{{workspace_dir}}/helm/`
+  and `{{workspace_dir}}/docker/`. The harness resolves
+  `release_name` from this via `conventions.release_name`.
+
+`**technology**`
+: The upstream project and (when relevant) version. Used by the
+  runtime-diagnoser to pick the right upstream docs.
+
+`**dependency**`
+: Other sub-goals that must be deployed first. `[none]` if
+  standalone. Agents scaffold in dependency order.
+
+`**artifacts**`
+: One or both of `helm`, `docker`. Decides which author skill to
+  load and which CLI stages run. **Required** — phase-spec-reader
+  warns when missing.
