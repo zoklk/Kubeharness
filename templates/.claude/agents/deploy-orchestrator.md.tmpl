@@ -16,25 +16,37 @@ the `runtime-diagnoser` subagent via `Task`.
 
 ## Inputs
 
-Read from the Task prompt:
+Read from the Task prompt (two whitespace-separated tokens):
 
-- `service` — required. Must match a folder under `{{workspace_dir}}/helm/<service>`
-  or `{{workspace_dir}}/docker/<service>` (at least one must exist).
+- `phase` — required. The stem of a file at `context/phases/<phase>.md`.
+- `sub_goal` — required. Matches a `## Sub-goal: <sub_goal>` section
+  header inside that phase doc.
 
 Read from `config/harness.yaml`:
 
 - `orchestration.max_runtime_retries` — your retry budget for
   `verify-runtime` failures (static/apply failures are **not** retried).
 
-## Session bootstrap
+## Resolve service (first step)
 
-Before any CLI call, set up the session log:
+Before any CLI call, resolve the workload identity from the phase doc.
+
+1. `Read context/phases/<phase>.md`.
+2. Locate the section `## Sub-goal: <sub_goal>`.
+3. Extract the `**service_name**: <slug>` field from that section.
+4. Set `SERVICE=<slug>`. This is what `--service` takes downstream.
+
+If any of (file, section, field) is missing → **stop** and report
+`"phase doc missing: context/phases/<phase>.md → sub_goal <sub_goal> → service_name"`.
+Phase docs are the contract; there is no fallback.
+
+## Session bootstrap
 
 ```bash
 SESSION_ID=$(date +%Y%m%d-%H%M%S)
 export HARNESS_SESSION_LOG="logs/deploy/${SESSION_ID}-${SERVICE}.log"
 mkdir -p "$(dirname "$HARNESS_SESSION_LOG")"
-echo "=== deploy $SERVICE @ $SESSION_ID ===" >> "$HARNESS_SESSION_LOG"
+echo "=== deploy $SERVICE (phase=$PHASE, sub_goal=$SUB_GOAL) @ $SESSION_ID ===" >> "$HARNESS_SESSION_LOG"
 ```
 
 Every subsequent `python -m harness:*` invocation appends to that file.
@@ -50,7 +62,7 @@ Do not create additional log files.
    - `passed=false` → **stop**. Same reporting rule. Infra errors
      (missing registry auth, quota) are not auto-fixable.
 3. `python -m harness verify-runtime --service $SERVICE \
-      --phase <phase> --sub-goal <service>`
+      --phase $PHASE --sub-goal $SUB_GOAL`
    - `passed=true` → return success.
    - `passed=false` → go to **step-diagnose**.
 
@@ -64,6 +76,8 @@ Task(
   subagent_type="runtime-diagnoser",
   prompt="""
 service: $SERVICE
+phase: $PHASE
+sub_goal: $SUB_GOAL
 failed_stage: verify-runtime
 session_log: $HARNESS_SESSION_LOG
 verify_runtime_response: |
@@ -101,6 +115,8 @@ Return one JSON object to the caller:
 
 ```json
 {
+  "phase": "...",
+  "sub_goal": "...",
   "service": "...",
   "passed": true,
   "retries": 0,
@@ -125,3 +141,5 @@ failure.
 - Do not skip the diagnoser on runtime failure. Even when the cause
   seems obvious, the diagnoser enforces the read-only cluster-query
   discipline.
+- Do not accept a `service` arg directly. Resolve it from the phase
+  doc so `context/phases/*.md` stays the single source of truth.

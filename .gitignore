@@ -23,7 +23,5 @@ build/
 .coverage
 htmlcov/
 
-# 임시 스크립트
-check_gemini_model.py
-
-log*
+# 세션 로그
+logs/

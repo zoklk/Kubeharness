@@ -1,32 +1,31 @@
-# {{project_name}} — Conventions
+# {{project_name}} — 규약
 
-Static, project-wide conventions for every service deployed through
-this harness. Values live in `config/harness.yaml`; this file explains
-**why** each convention exists so contributors know when (and when
-not) to depart from it.
+이 하네스를 통해 배포되는 모든 서비스에 공통으로 적용되는 정적
+프로젝트 규약입니다. 실제 값은 `config/harness.yaml` 에 있고, 이
+문서는 **왜** 그렇게 정했는지 — 기여자가 언제 따르고 언제 예외를
+둬도 되는지를 설명합니다.
 
-## Source of truth
+## 단일 진실의 원천
 
-`config/harness.yaml` is the single source of truth for:
+`config/harness.yaml` 이 아래 값들의 단일 진실의 원천입니다:
 
-- `cluster.namespace` — k8s namespace for all deploys.
-- `conventions.workspace_dir` — where service artifacts live. You
-  set this via `harness init --workspace <dir>`.
-- `conventions.release_name` — default `"{service}-{active_env}-v1"`.
-  The `-{active_env}-` segment lets dev and prod coexist on one
-  cluster without collisions.
-- `conventions.label_selector` — the label every workload must carry
-  (the harness uses it for `kubectl wait` / `kubectl get pods`).
-- `conventions.image_tag` — the tag docker images are pushed under.
-  Override per service in the chart only if that service versions
-  independently.
-- `environments.<env>.arch` — the target CPU arch; the harness passes
-  it as `docker build --platform linux/<arch>`.
+- `cluster.namespace` — 모든 배포가 들어가는 k8s 네임스페이스.
+- `conventions.workspace_dir` — 서비스 아티팩트가 사는 위치.
+  `harness init --workspace <dir>` 으로 정합니다.
+- `conventions.release_name` — 기본값 `"{service}-{active_env}-v1"`.
+  `-{active_env}-` 이 포함돼 dev/prod 릴리스가 한 클러스터에서
+  충돌 없이 공존합니다.
+- `conventions.label_selector` — 모든 워크로드가 반드시 붙여야 하는
+  레이블 (하네스가 `kubectl wait` / `kubectl get pods` 에 사용).
+- `conventions.image_tag` — docker 이미지가 push 되는 태그. 서비스
+  하나가 독립 버전을 갖는 경우에만 차트 안에서 따로 override.
+- `environments.<env>.arch` — 타깃 CPU arch. 하네스가
+  `docker build --platform linux/<arch>` 에 주입합니다.
 
-Do not duplicate these values in chart files or Dockerfiles. Read
-them from YAML or rely on the harness to inject them.
+이 값들을 차트 파일이나 Dockerfile 에 중복 기재하지 마세요. YAML
+에서 읽거나, 하네스가 주입하도록 두세요.
 
-## Service layout
+## 서비스 레이아웃
 
 ```
 {{workspace_dir}}/
@@ -41,12 +40,13 @@ them from YAML or rely on the harness to inject them.
     └── smoke-test-<sub_goal>.sh
 ```
 
-- A service must have at least one of `helm/` or `docker/` — both is
-  fine, neither is a configuration error.
-- Smoke tests are optional but recommended; they run after
-  `kubectl wait` passes.
+- 서비스는 `helm/` 또는 `docker/` 중 적어도 하나는 존재해야 합니다.
+  둘 다 있어도 되고, 둘 다 없으면 설정 오류가 아니라 "검출되지
+  않는 서비스" 로 처리됩니다.
+- 스모크 테스트는 선택이지만 권장합니다. `kubectl wait` 통과 뒤에
+  실행됩니다.
 
-## Labels (required)
+## 레이블 (필수)
 
 ```yaml
 metadata:
@@ -56,13 +56,13 @@ metadata:
     app.kubernetes.io/managed-by: Helm
 ```
 
-The harness's `kubectl wait` and `kubectl get pods` queries use
-`label_selector` to target pods — no label, no wait.
+하네스의 `kubectl wait` 와 `kubectl get pods` 쿼리는 `label_selector`
+로 pod 를 타깃팅합니다 — 레이블이 없으면 wait 도 없습니다.
 
-## Naming
+## 네이밍
 
-- Service slug: `[a-z][a-z0-9-]*`, matches the folder name under
-  `helm/`/`docker/` and the `**service_name**:` field in phase specs.
-- Release name: computed by `conventions.release_name` — never
-  hardcode.
-- Image: `<registry>/<service>:<image_tag>` — assembled by the CLI.
+- 서비스 slug: `[a-z][a-z0-9-]*`. `helm/`/`docker/` 아래 폴더명,
+  그리고 phase 스펙의 `**service_name**:` 필드와 일치해야 합니다.
+- 릴리스 이름: `conventions.release_name` 이 계산합니다 — 절대
+  하드코딩 금지.
+- 이미지: `<registry>/<service>:<image_tag>` — CLI 가 조립합니다.

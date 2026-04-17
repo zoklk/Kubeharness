@@ -1,49 +1,50 @@
-# {{project_name}} — Tech stack
+# {{project_name}} — 기술 스택
 
-What's in the box. Keep this current — it's the first file a new
-contributor (human or agent) reads before writing anything.
+이 프로젝트가 무엇으로 돌아가는지 한눈에. 항상 최신으로 유지하세요
+— 새로 합류한 기여자(사람이든 에이전트든)가 무언가를 쓰기 전에
+가장 먼저 읽을 문서입니다.
 
-## Cluster
+## 클러스터
 
-- **Kubernetes version**: TODO(init) — e.g. v1.29.x
-- **Distribution**: TODO(init) — e.g. k3s, EKS, GKE, kubeadm
+- **Kubernetes 버전**: TODO(init) — 예: v1.29.x
+- **배포판**: TODO(init) — 예: k3s, EKS, GKE, kubeadm
 - **CNI**: TODO(init)
-- **Ingress controller**: TODO(init) — e.g. nginx, traefik
+- **Ingress 컨트롤러**: TODO(init) — 예: nginx, traefik
 
-## Packaging
+## 패키징
 
-- **Helm**: v3.x. Charts live at `{{workspace_dir}}/helm/<service>/`.
-- **Container runtime**: containerd. Images pushed to
-  `conventions.registry` in `config/harness.yaml`.
+- **Helm**: v3.x. 차트는 `{{workspace_dir}}/helm/<service>/` 아래에 둡니다.
+- **컨테이너 런타임**: containerd. 이미지는 `config/harness.yaml` 의
+  `conventions.registry` 로 push 됩니다.
 
-## Harness dependencies (checks)
+## 하네스 의존 도구 (체크용)
 
-Installed separately; the CLI treats a missing binary as `skip`, not
-`fail`:
+별도로 설치해 두세요. CLI 는 바이너리가 없으면 `fail` 이 아니라
+`skip` 으로 처리합니다:
 
-- `yamllint` — static YAML hygiene
-- `helm` — chart lint, dry-run, template rendering
-- `kubeconform` — k8s API schema validation
-- `trivy` — chart config scan (optional)
-- `gitleaks` — secret scanning (optional)
+- `yamllint` — 정적 YAML 위생 검사
+- `helm` — 차트 lint, dry-run, 템플릿 렌더링
+- `kubeconform` — k8s API 스키마 검증
+- `trivy` — 차트 config 스캔 (선택)
+- `gitleaks` — 시크릿 스캔 (선택)
 - `hadolint` — Dockerfile lint
-- `docker`, `kubectl` — only called by the harness CLI
+- `docker`, `kubectl` — 하네스 CLI 만 직접 호출
 
-## Observability
+## 관측성
 
-TODO(init): describe the logging/metrics/tracing stack your cluster
-already exposes. Agents diagnosing a failure should consult this
-section to know where to look.
+TODO(init): 클러스터가 이미 제공하는 로깅 / 메트릭 / 트레이싱 스택을
+기술하세요. 실패를 진단하는 에이전트가 어디를 봐야 하는지 알려면
+이 섹션을 참고합니다.
 
-## Security posture
+## 보안 태세
 
 TODO(init):
-- pod security standards in use (`baseline`, `restricted`)
-- any required labels/annotations
-- secret management system (external-secrets, sealed-secrets, vault)
+- 사용 중인 pod security standards (`baseline`, `restricted`)
+- 필수 레이블/어노테이션
+- 시크릿 관리 시스템 (external-secrets, sealed-secrets, vault)
 
-## Known constraints
+## 알려진 제약
 
-TODO(init): anything the harness can't help with — e.g. "deploys must
-be paused during the nightly backup window 02:00-03:00 UTC". Document
-here so agents don't discover it by failing.
+TODO(init): 하네스가 도와줄 수 없는 제약을 적어 두세요. 예:
+"심야 02:00–03:00 UTC 백업 윈도우 동안 배포 중단". 문서로 남겨 두지
+않으면 에이전트가 실패를 통해서야 발견합니다.

@@ -1,54 +1,54 @@
-# Kubeharness configuration — copy to config/harness.yaml and customize.
-# Every TODO(init) line marks a value you MUST change before first deploy.
-# All other fields have sensible defaults; keep or override as needed.
+# Kubeharness 설정 — config/harness.yaml 로 복사해서 사용하세요.
+# TODO(init) 로 표시된 줄은 첫 배포 전에 반드시 교체해야 합니다.
+# 그 외 필드는 합리적 기본값을 가지고 있으니 필요할 때만 덮어쓰세요.
 #
-# Substitution: values like "{service}", "{active_env}", "{workspace}" are
-# expanded by harness/config.py at resolve() time; "{{var}}" placeholders are
-# expanded once at `python -m harness init`.
+# 치환: "{service}", "{active_env}", "{workspace}" 는 resolve() 시점에
+# harness/config.py 가 확장합니다. "{{var}}" 는 `python -m harness init`
+# 시점에 한 번만 확장됩니다.
 
 cluster:
-  # TODO(init): the k8s namespace your workloads deploy into.
+  # TODO(init): 워크로드가 배포될 k8s 네임스페이스.
   namespace: default
-  # kubeconfig: ~/.kube/config  # uncomment if $KUBECONFIG is not set
+  # kubeconfig: ~/.kube/config  # $KUBECONFIG 가 설정돼 있지 않다면 주석 해제
 
 conventions:
-  # Project workspace root. `harness init --workspace <name>` rewrites this.
+  # 프로젝트 워크스페이스 루트. `harness init --workspace <name>` 이 자동으로 써 줍니다.
   workspace_dir: {{workspace_dir}}
 
-  # Artifact paths. A stage only runs if its artifact exists (detection-gated).
+  # 아티팩트 경로. 해당 아티팩트가 존재할 때만 단계가 실행됩니다 (detection-gated).
   chart_path: "{workspace}/helm/{service}"
   docker_path: "{workspace}/docker/{service}"
   smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh"
 
-  # Release naming: env is part of the release name so dev/prod don't collide.
+  # 릴리스 이름: env 가 포함돼 dev/prod 릴리스가 충돌하지 않습니다.
   release_name: "{service}-{active_env}-v1"
   label_selector: "app.kubernetes.io/name={service}"
 
-  # values files, passed as -f in order. {active_env} binds at resolve() time.
+  # -f 로 이 순서대로 넘기는 values 파일. {active_env} 는 resolve() 시점 바인딩.
   values_files: ["values.yaml", "values-{active_env}.yaml"]
 
-  # Docker image tag written into `<registry>/<service>:<tag>`.
-  # Override to "latest", a git sha, or a semver as you prefer.
+  # docker 이미지 태그. `<registry>/<service>:<tag>` 로 기록됩니다.
+  # "latest", git sha, semver 등 원하는 값으로 덮어쓰세요.
   image_tag: "dev"
 
-  # TODO(init): registry for docker build/push. Must be reachable from the
-  # cluster. Empty string disables push (build only).
+  # TODO(init): docker build/push 대상 레지스트리. 클러스터에서 접근 가능해야 합니다.
+  # 빈 문자열이면 push 를 생략 (build 만).
   registry: "registry.example.local/myproject"
 
-  # Write guards shared by guard-path.sh hook + harness static checks.
-  # {workspace} is expanded at runtime.
+  # guard-path.sh 훅과 하네스 정적 체크가 공유하는 쓰기 가드.
+  # {workspace} 는 런타임에 확장됩니다.
   write_allowed_globs:
     - "{workspace}/helm/**"
     - "{workspace}/docker/**"
   write_denied_globs:
-    - "{workspace}/tests/**"   # smoke tests are out-of-band
+    - "{workspace}/tests/**"   # 스모크 테스트는 하네스 관리 범위 밖
 
 environments:
   active: dev
-  # TODO(init): tailor domain_suffix, arch, and node_selectors for your cluster.
+  # TODO(init): 클러스터에 맞춰 domain_suffix, arch, node_selectors 조정.
   dev:
     domain_suffix: dev.example.local
-    arch: amd64                # used for `docker build --platform linux/<arch>`
+    arch: amd64                # `docker build --platform linux/<arch>` 에 사용
     node_selectors:
       storage: node-a
       monitoring: node-b
@@ -66,22 +66,22 @@ checks:
     kubeconform: { enabled: true }
     trivy_config: { enabled: true }
     gitleaks: { enabled: true }
-    helm_dry_run_server: { enabled: true }   # needs cluster access
-    hadolint: { enabled: true }              # only runs if Dockerfile exists
+    helm_dry_run_server: { enabled: true }   # 클러스터 접근 필요
+    hadolint: { enabled: true }              # Dockerfile 이 있을 때만 실행
     gitleaks_docker: { enabled: true }
   runtime:
     docker_build_push: { enabled: true }
     helm_upgrade: { enabled: true }
     kubectl_wait:
       enabled: true
-      initial_wait_seconds: 60       # first wait probe (pods ready in "normal" time)
-      terminal_grace_seconds: 240    # extra wait after Pending/ContainerCreating
+      initial_wait_seconds: 60       # 1차 wait (pod 가 "정상" 시간 내 ready 되길 기대)
+      terminal_grace_seconds: 240    # Pending/ContainerCreating 이후 추가 대기
     smoke_test: { enabled: true }
 
 logging:
-  dir: "logs/deploy"         # one file per /deploy session
-  tail_chars: 2000           # size of log_tail echoed in CLI JSON output
-  retention_days: 30         # delete older session logs (future)
+  dir: "logs/deploy"         # /deploy 세션당 파일 1개
+  tail_chars: 2000           # CLI JSON 응답의 log_tail 크기
+  retention_days: 30         # 오래된 세션 로그 삭제 (향후 구현)
 
 orchestration:
-  max_runtime_retries: 3     # deploy-orchestrator self-converge budget
+  max_runtime_retries: 3     # deploy-orchestrator 자가 수렴 버짓

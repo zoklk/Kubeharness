@@ -44,8 +44,11 @@ task, forget it when done. Do **not** copy skill content into this file.
 ## Subagents — when to call
 
 - **`deploy-orchestrator`** — the only way to run a full deploy cycle.
-  Invoked by `/deploy <service>`. Owns the verify-static → apply →
-  verify-runtime loop with retry budget and human-approved diffs.
+  Invoked by `/deploy <phase> <sub_goal>`. Owns the verify-static →
+  apply → verify-runtime loop with retry budget and human-approved
+  diffs. Resolves `service_name` from
+  `context/phases/<phase>.md` → `## Sub-goal: <sub_goal>`, so phase
+  docs must exist before running.
 - **`runtime-diagnoser`** — read-only Kubernetes diagnosis. Call via
   `Task(subagent_type="runtime-diagnoser", prompt=...)` when:
   - the user asks something like *"why is prometheus flaky?"*, or
@@ -67,14 +70,15 @@ Never call them from each other except in the documented direction
 3. Write `{{workspace_dir}}/helm/<service>/` and/or
    `{{workspace_dir}}/docker/<service>/` (writes require human approval
    per `ask` permission).
-4. Confirm with the user, then suggest `/deploy <service>`.
+4. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
 
 ### Iterate on an existing service
 
 1. Load the relevant author skill.
 2. Edit files under `{{workspace_dir}}/`.
-3. Run `/deploy <service>` (or `python -m harness verify-static --service <svc>`
-   if only static checks are in doubt).
+3. Run `/deploy <phase> <sub_goal>` (or
+   `python -m harness verify-static --service <svc>` if only static
+   checks are in doubt).
 
 ### Observe only
 
