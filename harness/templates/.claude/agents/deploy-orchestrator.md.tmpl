@@ -42,27 +42,40 @@ Phase docs are the contract; there is no fallback.
 
 ## Session bootstrap
 
+Claude Code spawns a new shell per Bash call, so env exports do not
+persist across invocations. Instead, ask the CLI for a canonical log
+path and thread it through every subsequent call via `--session-log`:
+
 ```bash
-SESSION_ID=$(date +%Y%m%d-%H%M%S)
-export HARNESS_SESSION_LOG="logs/deploy/${SESSION_ID}-${SERVICE}.log"
-mkdir -p "$(dirname "$HARNESS_SESSION_LOG")"
-echo "=== deploy $SERVICE (phase=$PHASE, sub_goal=$SUB_GOAL) @ $SESSION_ID ===" >> "$HARNESS_SESSION_LOG"
+python -m harness session-path --service $SERVICE
+# stdout: logs/deploy/20260417-081530-prometheus.log
 ```
 
-Every subsequent `python -m harness:*` invocation appends to that file.
-Do not create additional log files.
+Capture that path as `$SESSION_LOG` (remember the string — it is the
+single argument you pass to every stage below). Do **not** `export
+HARNESS_SESSION_LOG=...`; the permission matcher does not recognize an
+env-prefixed command as `python -m harness:*`.
+
+`session-path` does not create the file. The first `shell.run` append
+inside the verify/apply call opens it with `mkdir -p` semantics.
+
+Write a session-start event via the first verify-static call — do not
+shell out to `echo` / `printf` for this.
 
 ## Pipeline (retry_count = 0)
 
-1. `python -m harness verify-static --service $SERVICE`
+Pass `--session-log "$SESSION_LOG"` on every call so all three stages
+append to the same file.
+
+1. `python -m harness verify-static --service $SERVICE --session-log "$SESSION_LOG"`
    - JSON `passed=false` → **stop immediately**. Report to the main
      session with the summary and the session log path. Static errors
      are initial-code bugs; the main session fixes them, not you.
-2. `python -m harness apply --service $SERVICE`
+2. `python -m harness apply --service $SERVICE --session-log "$SESSION_LOG"`
    - `passed=false` → **stop**. Same reporting rule. Infra errors
      (missing registry auth, quota) are not auto-fixable.
 3. `python -m harness verify-runtime --service $SERVICE \
-      --phase $PHASE --sub-goal $SUB_GOAL`
+      --phase $PHASE --sub-goal $SUB_GOAL --session-log "$SESSION_LOG"`
    - `passed=true` → return success.
    - `passed=false` → go to **step-diagnose**.
 
@@ -104,8 +117,9 @@ Parse the diagnoser's JSON response:
    will surface an `ask` prompt because `{{workspace_dir}}/**` is in
    the `ask` permission list.
 3. If any approval is denied → **stop**. Report "user declined fix".
-4. If all approvals succeed → append
-   `[orchestrator] applied N file(s)` to `$HARNESS_SESSION_LOG`.
+4. If all approvals succeed → record the retry via
+   `python -m harness session-event --session-log "$SESSION_LOG" \
+      --message "[orchestrator] applied N file(s) — retry_count=R"`.
 5. `retry_count += 1` → jump back to **step 1** of the pipeline. The
    changed files must pass static checks again.
 

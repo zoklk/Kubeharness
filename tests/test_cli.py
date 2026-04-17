@@ -181,3 +181,84 @@ def test_missing_subcommand_errors(monkeypatch):
 def test_apply_requires_service(monkeypatch):
     with pytest.raises(SystemExit):
         cli.main(["apply"])
+
+
+# ─── all-skip is success (CRD-only chart, docker-only verify-runtime) ────────
+
+
+def test_verify_runtime_all_skip_returns_zero(
+    cfg, config_path, monkeypatch, tmp_path,
+):
+    """CRD-only chart / docker-only verify-runtime can yield all-skip results.
+
+    _overall_passed must treat that as pass (exit 0), not fail. Regression
+    guard: the previous implementation required at least one 'pass'.
+    """
+    monkeypatch.delenv("HARNESS_SESSION_LOG", raising=False)
+
+    def _fake(service, cfg, *, phase=None, sub_goal=None):
+        return [
+            CheckResult(name="kubectl_wait", status="skip", detail="CRD-only chart"),
+            CheckResult(name="smoke_test", status="skip", detail="no script"),
+        ]
+    monkeypatch.setattr(cli.runtime, "verify_runtime", _fake)
+
+    code, payload = _run(monkeypatch, [
+        "--config", str(config_path),
+        "verify-runtime", "--service", "svc",
+    ])
+    assert code == 0
+    assert payload["passed"] is True
+    assert payload["summary"] == "0 passed, 0 failed, 2 skipped"
+
+
+# ─── --session-log flag + session-path / session-event subcommands ───────────
+
+
+def test_session_log_flag_overrides_env(
+    cfg, config_path, stubbed_static, monkeypatch, tmp_path,
+):
+    """--session-log wins over $HARNESS_SESSION_LOG — the orchestrator needs this."""
+    env_log = tmp_path / "env.log"
+    flag_log = tmp_path / "flag.log"
+    monkeypatch.setenv("HARNESS_SESSION_LOG", str(env_log))
+    code, payload = _run(monkeypatch, [
+        "--config", str(config_path),
+        "verify-static", "--service", "svc",
+        "--session-log", str(flag_log),
+    ])
+    assert code == 0
+    assert payload["session_log"] == str(flag_log)
+    assert flag_log.exists()
+    # env_log should NOT have been created — flag overrode it
+    assert not env_log.exists()
+
+
+def test_session_path_prints_canonical_path(cfg, config_path, monkeypatch, tmp_path):
+    """session-path should print a per-deploy log path and NOT create it."""
+    buf = _capture(monkeypatch)
+    code = cli.main([
+        "--config", str(config_path),
+        "session-path", "--service", "prometheus",
+    ])
+    assert code == 0
+    printed = Path(buf.getvalue().strip())
+    assert "prometheus" in printed.name
+    assert printed.name.endswith(".log")
+    # session-path must NOT create the file (orchestrator opens it lazily)
+    assert not printed.exists()
+
+
+def test_session_event_appends_line(monkeypatch, tmp_path):
+    """session-event writes one free-form line to --session-log for orchestrator audit."""
+    log = tmp_path / "orch.log"
+    code = cli.main([
+        "session-event",
+        "--session-log", str(log),
+        "--message", "[orchestrator] applied 2 file(s) — retry_count=1",
+    ])
+    assert code == 0
+    assert log.exists()
+    content = log.read_text(encoding="utf-8")
+    assert "[orchestrator] applied 2 file(s)" in content
+    assert content.endswith("\n")

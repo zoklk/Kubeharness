@@ -91,9 +91,17 @@ the response without explicit user instruction.
 ## CLI cheat sheet
 
 ```bash
+# Standalone invocations (CLI auto-generates a per-stage session log):
 python -m harness verify-static  --service <svc>
 python -m harness apply          --service <svc>
 python -m harness verify-runtime --service <svc> --phase <phase> --sub-goal <svc>
+
+# Orchestrator flow — share one session log across all three stages:
+LOG=$(python -m harness session-path --service <svc>)
+python -m harness verify-static  --service <svc> --session-log "$LOG"
+python -m harness apply          --service <svc> --session-log "$LOG"
+python -m harness verify-runtime --service <svc> --phase <p> --sub-goal <s> \
+    --session-log "$LOG"
 ```
 
 JSON envelope: `{service, stage, summary, passed, session_log, checks[]}`.

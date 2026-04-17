@@ -12,7 +12,7 @@
 2. **파이프라인 단계 기준 배치.** 파일을 *어떤 도구* 가 아니라 *언제 실행되느냐* 로 묶는다. 배포 전 → `static.py`, 배포 · 배포 후 → `runtime.py`. 유지보수자가 "배포 후 돌아가는 체크"를 찾을 때 파일 하나만 열면 된다.
 3. **도구 중립성.** 파이썬 CLI, `config/harness.yaml`, `AGENTS.md`, hook 스크립트는 어떤 에이전트 CLI 에서도 동작한다. `.claude/` 는 Claude Code 전용 wiring 예시일 뿐 런타임 의존성이 아니다.
 4. **프로젝트 값은 하드코딩 금지.** namespace, release naming, chart path, image tag, 체크 enabled 목록, 타임아웃 — 소비자별로 달라지는 값은 **전부 `config/harness.yaml` 한 곳**. 코드 · skill · hook · slash command 모두 이 YAML 을 읽는다.
-5. **한 번의 `/deploy` = 하나의 로그 파일.** 배포 사이클 동안 모든 subprocess 는 단일 `$HARNESS_SESSION_LOG` 에 append 한다. 도구별 개별 로그 파일은 안티 피처.
+5. **한 번의 `/deploy` = 하나의 로그 파일.** 배포 사이클 동안 모든 subprocess 는 단일 세션 로그에 append 한다. 경로는 CLI 의 `--session-log` 플래그 또는 `$HARNESS_SESSION_LOG` env 로 전달되고, 플래그가 env 보다 우선. 도구별 개별 로그 파일은 안티 피처.
 6. **최소주의.** 빈 스캐폴딩 · 선행 추상화 · "혹시 필요할지 몰라" 모듈 없음. 파이썬 파일은 딱 6개, 책임 1개당 1개.
 
 ---
@@ -57,7 +57,7 @@ cfg.checks.runtime.kubectl_wait.initial_wait_seconds  # int
 
 모든 subprocess 의 단일 진입점. 패키지 내 다른 모든 모듈(static 체크, helm 호출, kubectl wait)은 `shell.run` 또는 `shell.pipe` 를 거친다. 이 모듈이 소유하는 것:
 
-- **timeout** (기본 120s, 호출별 override)
+- **timeout** — 기본값 없음(`None`). 호출자가 필요하면 `timeout=<초>` 로 명시. 도구별 타이밍 정책(`checks.runtime.kubectl_wait.*` 등)은 `config/harness.yaml` 에 있고 호출자(runtime.py 등)가 읽어 넣는다.
 - **세션 로그 append** — `HARNESS_SESSION_LOG` 가 설정돼 있으면 매 호출이 아래 블록을 append:
   ```
   --- [label] $ cmd ---
@@ -121,10 +121,10 @@ DOCKER_CHECKS = {hadolint, gitleaks_docker}
 
 ### `cli.py`
 
-argparse 기반, 서브커맨드 4개: `init`, `verify-static`, `apply`, `verify-runtime`. 각 verify/apply 커맨드는:
+argparse 기반, 서브커맨드 6개: `init`, `verify-static`, `apply`, `verify-runtime`, `session-path`, `session-event`. 각 verify/apply 커맨드는:
 
 - config 로드 (`ConfigError` 면 exit code `2`)
-- caller 가 `$HARNESS_SESSION_LOG` 를 안 잡아뒀으면 기본값으로 설정
+- 세션 로그 경로 결정: `--session-log <path>` 플래그 > `$HARNESS_SESSION_LOG` env > 자동 생성 (`logging.dir/<ts>-<service>-<stage>-standalone.log`). 결정된 경로를 프로세스 env 로 내보내서 `shell.run` 이 append.
 - 세션 시작 이벤트를 로그에 기록
 - `static.run_static` / `runtime.apply` / `runtime.verify_runtime` 호출
 - stdout 에 JSON 응답 방출:
@@ -142,9 +142,14 @@ argparse 기반, 서브커맨드 4개: `init`, `verify-static`, `apply`, `verify
 
 이 JSON 응답이 호출 에이전트와의 유일한 통신 채널. 중요한 건 stderr 로 흘리지 않는다 — 전부 세션 로그에 있다.
 
+두 개의 보조 서브커맨드는 orchestrator subagent 전용:
+
+- **`session-path --service <svc>`** — 표준 로그 경로 하나를 stdout 으로 찍고 종료. 파일은 만들지 않는다. orchestrator 가 이 값을 잡아두고 이후 `--session-log` 로 세 스테이지에 일관되게 넘긴다. env-prefix(`HARNESS_SESSION_LOG=... python …`) 를 쓰지 않기 위한 우회로 — Claude Code 의 퍼미션 매처가 env-prefix 된 커맨드를 `python -m harness:*` 로 매치 못 하기 때문.
+- **`session-event --session-log <path> --message <text>`** — 한 줄 자유 텍스트를 세션 로그에 append. orchestrator 의 retry count, approval granted 같은 non-subprocess 감사 이벤트용. `echo`/`printf` 를 allow list 에 추가할 필요 없게.
+
 ### `init.py`
 
-stdlib 만 쓰는 템플릿 복사기. 설치된 패키지 상대경로에서 `templates/` 를 걸어 다니며 `--dest` 로 복사하고, 이름이 `.tmpl` 로 끝나는 파일에 3가지 치환을 적용:
+stdlib 만 쓰는 템플릿 복사기. 패키지 내부에 번들된 `harness/templates/` 를 걸어 다니며 `--dest` 로 복사하고, 이름이 `.tmpl` 로 끝나는 파일에 3가지 치환을 적용:
 
 - `{{project_name}}` ← `--name` (또는 `basename(dest)`)
 - `{{workspace_dir}}` ← `--workspace` (기본 `workspace`)
@@ -153,6 +158,8 @@ stdlib 만 쓰는 템플릿 복사기. 설치된 패키지 상대경로에서 `t
 치환 후 `.tmpl` suffix 를 떼어낸다. `.tmpl` 이 아닌 파일은 그대로 복사. 기존 파일은 `--force` 없으면 건너뛴다.
 
 **Jinja2 · 템플릿 엔진 의도적으로 미도입** — 위 3개 변수가 전체 surface area.
+
+템플릿 트리는 `harness/templates/` 로 파이썬 패키지 안에 산다. `pyproject.toml` 의 `[tool.setuptools.package-data]` + 루트 `MANIFEST.in` 이 sdist/wheel 에 포함시킨다. 덕분에 `pip install kubeharness` 만으로 `init` 이 동작 — 소스 체크아웃이 필요 없다.
 
 ---
 
@@ -163,7 +170,8 @@ stdlib 만 쓰는 템플릿 복사기. 설치된 패키지 상대경로에서 `t
   │  /deploy <svc> 실행
   ▼
 deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
-  │  HARNESS_SESSION_LOG = logs/deploy/<ts>-<svc>.log 설정
+  │  LOG=$(python -m harness session-path --service <svc>)
+  │  이후 호출마다 --session-log "$LOG" 를 붙인다
   │
   ├─►  python -m harness verify-static --service <svc>  ──►  stdout JSON
   │         └── shell.run 이 subprocess 출력을 세션 로그에 append
@@ -225,13 +233,13 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
 
 ### 서브커맨드 추가
 
-욕구를 참으시라. 4개(`init`, `verify-static`, `apply`, `verify-runtime`)가 직교하는 연산이고 상상할 수 있는 거의 모든 새 동사가 이것들의 조합이다. 정말 필요하다면 `cli._build_parser` 에 연결하되 핸들러는 재사용 헬퍼가 필요하지 않은 한 `cli.py` 안에 둔다.
+욕구를 참으시라. 4개 핵심(`init`, `verify-static`, `apply`, `verify-runtime`)과 2개 orchestrator 유틸(`session-path`, `session-event`)이 직교하는 연산이고 상상할 수 있는 거의 모든 새 동사가 이것들의 조합이다. 정말 필요하다면 `cli._build_parser` 에 연결하되 핸들러는 재사용 헬퍼가 필요하지 않은 한 `cli.py` 안에 둔다.
 
 ---
 
 ## 6. 세션 로그 규약
 
-- **경로**: `$HARNESS_SESSION_LOG`. env var 가 없으면 CLI 가 `logging.dir/<ts>-<service>-<stage>-standalone.log` 에 기본 파일을 만든다.
+- **경로 우선순위**: `--session-log <path>` CLI 플래그 > `$HARNESS_SESSION_LOG` env > 자동 생성 `logging.dir/<ts>-<service>-<stage>-standalone.log`. 세 개 다 없을 일은 없음 — 자동 생성이 항상 존재. orchestrator 는 `session-path` 로 경로를 한 번 받아 `--session-log` 로 세 스테이지에 공유한다.
 - **명령별 블록**:
   ```
   --- [label] $ <argv> ---

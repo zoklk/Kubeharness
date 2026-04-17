@@ -4,7 +4,6 @@ version = "2.0.0"
 description = "Deterministic Kubernetes deploy/verify CLI + agent wiring templates"
 requires-python = ">=3.11"
 dependencies = [
-    "pydantic",
     "pyyaml",
     "yamllint",
 ]
@@ -23,6 +22,14 @@ kubeharness = "harness.cli:main"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+include-package-data = true
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["harness*"]
+
+[tool.setuptools.package-data]
+# MANIFEST.in lists template files (incl. hidden dirs like .claude/) so
+# that both sdist and wheel builds ship the scaffold tree.
+harness = ["templates/**/*"]

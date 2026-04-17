@@ -39,11 +39,11 @@ class _Report:
 def _templates_root() -> Path:
     """Resolve the bundled templates/ directory.
 
-    Kubeharness is installed as ``harness`` with ``templates/`` sibling to it
-    (editable install and source layout). Wheel packaging (future) will need
-    ``importlib.resources`` but that's out of scope for now.
+    ``templates/`` lives inside the ``harness`` package so wheel installs
+    ship it via ``[tool.setuptools.package-data]``. Works identically for
+    editable installs (source layout) and sdist/wheel installs.
     """
-    root = Path(__file__).resolve().parent.parent / "templates"
+    root = Path(__file__).resolve().parent / "templates"
     if not root.is_dir():
         raise InitError(
             f"bundled templates/ not found at {root} "

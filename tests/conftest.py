@@ -91,6 +91,16 @@ def _clear_config_cache():
     config_mod.load_config.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Auto-chdir into tmp_path so no test can leak `logs/` or `workspace/`
+    into the repo root, even if the author forgets an explicit chdir.
+    tmp_path is auto-removed by pytest, so the artifacts go with it.
+    """
+    monkeypatch.chdir(tmp_path)
+    yield
+
+
 @pytest.fixture
 def session_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "session.log"

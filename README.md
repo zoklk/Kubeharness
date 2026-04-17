@@ -112,7 +112,7 @@ my-infra/
 4. 에이전트 루프(4a) 또는 CLI 직접 호출(4b) 로 배포 실행
 5. (GitHub 연동 시) `git init` · `.gitignore` 에 `logs/`, `.claude/settings.local.json` 추가 후 첫 커밋. `.claude/` 본체는 팀 공용이니 커밋 대상
 
-`harness/`, `templates/`, `docs/` 은 생기지 **않습니다** — 그건 kubeharness 레포 자체의 파일이고, 소비자 프로젝트는 `pip install` 된 패키지를 `python -m harness` 로 호출만 합니다.
+`harness/`, `docs/` 은 생기지 **않습니다** — 그건 kubeharness 레포 자체의 파일이고, 소비자 프로젝트는 `pip install` 된 패키지를 `python -m harness` 로 호출만 합니다. 템플릿 원본은 `harness/templates/` 로 패키지에 번들돼 있습니다.
 
 ## 에이전트 CLI 워크플로
 
@@ -137,20 +137,21 @@ Codex CLI 등 다른 에이전트 러너는 같은 `AGENTS.md` 를 읽습니다.
 - `logging` — 세션 로그 디렉터리, JSON 응답의 `log_tail` 길이, 보관 기간
 - `orchestration` — orchestrator subagent 의 `max_runtime_retries` 버짓
 
-전체 스키마는 인라인 주석과 함께 `templates/config/harness.yaml.example.tmpl`(또는 스캐폴드된 `config/harness.yaml.example`)에 있습니다.
+전체 스키마는 인라인 주석과 함께 `harness/templates/config/harness.yaml.example.tmpl`(또는 스캐폴드된 `config/harness.yaml.example`)에 있습니다.
 
 ## 레포 구조
 
 ```
 kubeharness/
-├── harness/           # 파이썬 패키지 (6 모듈 + 엔트리포인트)
-├── templates/         # `harness init` 이 복사할 트리
-│   ├── AGENTS.md.tmpl · CLAUDE.md.tmpl
-│   ├── config/harness.yaml.example.tmpl
-│   ├── .claude/       # Claude Code 전용 wiring
-│   └── context/       # conventions.md · tech_stack.md · phases/_template.md
-├── docs/design.md     # 아키텍처 레퍼런스
-├── tests/             # pytest (클러스터 불필요)
+├── harness/               # 파이썬 패키지 (6 모듈 + 엔트리포인트)
+│   └── templates/         # `harness init` 이 복사할 트리 (wheel 번들)
+│       ├── AGENTS.md.tmpl · CLAUDE.md.tmpl
+│       ├── config/harness.yaml.example.tmpl
+│       ├── .claude/       # Claude Code 전용 wiring
+│       └── context/       # conventions.md · tech_stack.md · phases/_template.md
+├── docs/design.md         # 아키텍처 레퍼런스
+├── tests/                 # pytest (클러스터 불필요)
+├── MANIFEST.in            # 템플릿 트리 sdist/wheel 포함용
 └── pyproject.toml
 ```
 
