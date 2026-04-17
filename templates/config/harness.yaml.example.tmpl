@@ -1,0 +1,87 @@
+# Kubeharness configuration — copy to config/harness.yaml and customize.
+# Every TODO(init) line marks a value you MUST change before first deploy.
+# All other fields have sensible defaults; keep or override as needed.
+#
+# Substitution: values like "{service}", "{active_env}", "{workspace}" are
+# expanded by harness/config.py at resolve() time; "{{var}}" placeholders are
+# expanded once at `python -m harness init`.
+
+cluster:
+  # TODO(init): the k8s namespace your workloads deploy into.
+  namespace: default
+  # kubeconfig: ~/.kube/config  # uncomment if $KUBECONFIG is not set
+
+conventions:
+  # Project workspace root. `harness init --workspace <name>` rewrites this.
+  workspace_dir: {{workspace_dir}}
+
+  # Artifact paths. A stage only runs if its artifact exists (detection-gated).
+  chart_path: "{workspace}/helm/{service}"
+  docker_path: "{workspace}/docker/{service}"
+  smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh"
+
+  # Release naming: env is part of the release name so dev/prod don't collide.
+  release_name: "{service}-{active_env}-v1"
+  label_selector: "app.kubernetes.io/name={service}"
+
+  # values files, passed as -f in order. {active_env} binds at resolve() time.
+  values_files: ["values.yaml", "values-{active_env}.yaml"]
+
+  # Docker image tag written into `<registry>/<service>:<tag>`.
+  # Override to "latest", a git sha, or a semver as you prefer.
+  image_tag: "dev"
+
+  # TODO(init): registry for docker build/push. Must be reachable from the
+  # cluster. Empty string disables push (build only).
+  registry: "registry.example.local/myproject"
+
+  # Write guards shared by guard-path.sh hook + harness static checks.
+  # {workspace} is expanded at runtime.
+  write_allowed_globs:
+    - "{workspace}/helm/**"
+    - "{workspace}/docker/**"
+  write_denied_globs:
+    - "{workspace}/tests/**"   # smoke tests are out-of-band
+
+environments:
+  active: dev
+  # TODO(init): tailor domain_suffix, arch, and node_selectors for your cluster.
+  dev:
+    domain_suffix: dev.example.local
+    arch: amd64                # used for `docker build --platform linux/<arch>`
+    node_selectors:
+      storage: node-a
+      monitoring: node-b
+  prod:
+    domain_suffix: cluster.local
+    arch: arm64
+    node_selectors:
+      storage: node-p1
+      monitoring: node-p2
+
+checks:
+  static:
+    yamllint: { enabled: true }
+    helm_lint: { enabled: true }
+    kubeconform: { enabled: true }
+    trivy_config: { enabled: true }
+    gitleaks: { enabled: true }
+    helm_dry_run_server: { enabled: true }   # needs cluster access
+    hadolint: { enabled: true }              # only runs if Dockerfile exists
+    gitleaks_docker: { enabled: true }
+  runtime:
+    docker_build_push: { enabled: true }
+    helm_upgrade: { enabled: true }
+    kubectl_wait:
+      enabled: true
+      initial_wait_seconds: 60       # first wait probe (pods ready in "normal" time)
+      terminal_grace_seconds: 240    # extra wait after Pending/ContainerCreating
+    smoke_test: { enabled: true }
+
+logging:
+  dir: "logs/deploy"         # one file per /deploy session
+  tail_chars: 2000           # size of log_tail echoed in CLI JSON output
+  retention_days: 30         # delete older session logs (future)
+
+orchestration:
+  max_runtime_retries: 3     # deploy-orchestrator self-converge budget

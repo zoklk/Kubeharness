@@ -1,131 +1,341 @@
+"""Configuration loader for ``config/harness.yaml``.
+
+The consumer project ships a ``config/harness.yaml`` at its CWD. This module
+parses it into typed dataclasses and exposes a resolver API so call sites never
+need to know the raw schema layout.
+
+Public API (see refactor.md §9):
+
+    cfg = load_config()
+    cfg.cluster.namespace
+    cfg.conventions.workspace_dir
+    cfg.active_env
+    cfg.env("dev").domain_suffix
+    cfg.env("dev").node_selectors["storage"]
+    cfg.checks.static.enabled_names
+    cfg.checks.runtime.kubectl_wait.initial_wait_seconds
+
+    rs = cfg.resolve("prometheus")
+    rs.release_name      # "prometheus-dev-v1"
+    rs.chart_path        # Path("workspace/helm/prometheus")
+    rs.docker_path       # Path("workspace/docker/prometheus")
+    rs.values_files()    # [Path("values.yaml"), Path("values-dev.yaml")]
+
+    cfg.smoke_test_path("prometheus", phase="observability", sub_goal="prometheus")
 """
-클러스터 환경 설정 로더.
-config/cluster.yaml의 active 환경 설정을 읽어 반환.
-"""
+
+from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
+from typing import Any
+
 import yaml
 
-# HARNESS_ROOT: harness 코드가 있는 디렉터리 (harness/config.py → harness/ → GikView/)
-HARNESS_ROOT = Path(__file__).resolve().parent.parent
 
-# PROJECT_ROOT: 프로젝트 파일이 있는 디렉터리
-# HARNESS_PROJECT_DIR 환경변수로 오버라이드 가능, 기본값은 sibling workspace/
-_env = os.environ.get("HARNESS_PROJECT_DIR", "")
-PROJECT_ROOT = Path(_env) if _env else HARNESS_ROOT.parent / "workspace"
-
-_CONFIG_PATH = PROJECT_ROOT / "config" / "cluster.yaml"
-_BUILD_CONFIG_PATH = PROJECT_ROOT / "config" / "build.yaml"
+CONFIG_PATH_DEFAULT = Path("config/harness.yaml")
 
 
-def _parse_build() -> dict:
-    if not _BUILD_CONFIG_PATH.exists():
-        return {}
+class ConfigError(ValueError):
+    """Raised when ``config/harness.yaml`` is missing or malformed."""
+
+
+# ─── dataclasses ─────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Cluster:
+    namespace: str
+    kubeconfig: str | None = None
+
+
+@dataclass(frozen=True)
+class Conventions:
+    workspace_dir: str
+    chart_path: str
+    docker_path: str
+    smoke_test_path: str
+    release_name: str
+    label_selector: str
+    values_files: tuple[str, ...]
+    write_allowed_globs: tuple[str, ...]
+    write_denied_globs: tuple[str, ...]
+    registry: str
+    image_tag: str
+
+
+@dataclass(frozen=True)
+class Environment:
+    name: str
+    domain_suffix: str
+    arch: str
+    node_selectors: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class StaticChecks:
+    _enabled: dict[str, bool]
+
+    @property
+    def enabled_names(self) -> list[str]:
+        return [name for name, v in self._enabled.items() if v]
+
+    def is_enabled(self, name: str) -> bool:
+        return self._enabled.get(name, False)
+
+
+@dataclass(frozen=True)
+class KubectlWaitCheck:
+    enabled: bool
+    initial_wait_seconds: int
+    terminal_grace_seconds: int
+
+
+@dataclass(frozen=True)
+class RuntimeChecks:
+    docker_build_push: bool
+    helm_upgrade: bool
+    kubectl_wait: KubectlWaitCheck
+    smoke_test: bool
+
+
+@dataclass(frozen=True)
+class Checks:
+    static: StaticChecks
+    runtime: RuntimeChecks
+
+
+@dataclass(frozen=True)
+class Logging:
+    dir: str
+    tail_chars: int
+    retention_days: int
+
+
+@dataclass(frozen=True)
+class Orchestration:
+    max_runtime_retries: int
+
+
+@dataclass(frozen=True)
+class ResolvedService:
+    """Service-bound view of ``conventions``. All patterns expanded."""
+
+    service: str
+    namespace: str
+    release_name: str
+    label_selector: str
+    chart_path: Path
+    docker_path: Path
+    registry: str
+    image_tag: str
+    _values_file_patterns: tuple[str, ...]
+    _active_env: str
+
+    def values_files(self) -> list[Path]:
+        """Return chart-relative value file paths (caller joins with chart_path)."""
+        return [
+            Path(pat.format(active_env=self._active_env))
+            for pat in self._values_file_patterns
+        ]
+
+
+@dataclass(frozen=True)
+class Config:
+    cluster: Cluster
+    conventions: Conventions
+    active_env: str
+    environments: dict[str, Environment]
+    checks: Checks
+    logging: Logging
+    orchestration: Orchestration
+    _source: Path
+
+    # ── helpers ─────────────────────────────────────────────────────────────
+
+    def env(self, name: str) -> Environment:
+        try:
+            return self.environments[name]
+        except KeyError:
+            raise ConfigError(f"unknown environment: {name!r}") from None
+
+    def active_environment(self) -> Environment:
+        return self.env(self.active_env)
+
+    def resolve(self, service: str) -> ResolvedService:
+        c = self.conventions
+        subs = {
+            "workspace": c.workspace_dir,
+            "service": service,
+            "active_env": self.active_env,
+        }
+        return ResolvedService(
+            service=service,
+            namespace=self.cluster.namespace,
+            release_name=c.release_name.format(**subs),
+            label_selector=c.label_selector.format(**subs),
+            chart_path=Path(c.chart_path.format(**subs)),
+            docker_path=Path(c.docker_path.format(**subs)),
+            registry=c.registry,
+            image_tag=c.image_tag,
+            _values_file_patterns=c.values_files,
+            _active_env=self.active_env,
+        )
+
+    def smoke_test_path(self, service: str, phase: str, sub_goal: str) -> Path:
+        c = self.conventions
+        return Path(c.smoke_test_path.format(
+            workspace=c.workspace_dir,
+            service=service,
+            phase=phase,
+            sub_goal=sub_goal,
+        ))
+
+
+# ─── parsing ─────────────────────────────────────────────────────────────────
+
+
+def _require_dict(obj: Any, key: str) -> dict:
+    if not isinstance(obj, dict):
+        raise ConfigError(f"{key}: expected mapping, got {type(obj).__name__}")
+    return obj
+
+
+def _parse(raw: dict, source: Path) -> Config:
+    cluster_raw = _require_dict(raw.get("cluster", {}), "cluster")
+    cluster = Cluster(
+        namespace=str(cluster_raw.get("namespace") or "default"),
+        kubeconfig=cluster_raw.get("kubeconfig"),
+    )
+
+    conv_raw = _require_dict(raw.get("conventions", {}), "conventions")
+    conv = Conventions(
+        workspace_dir=str(conv_raw.get("workspace_dir", "workspace")),
+        chart_path=str(conv_raw.get("chart_path", "{workspace}/helm/{service}")),
+        docker_path=str(conv_raw.get("docker_path", "{workspace}/docker/{service}")),
+        smoke_test_path=str(conv_raw.get(
+            "smoke_test_path",
+            "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh",
+        )),
+        release_name=str(conv_raw.get("release_name", "{service}-{active_env}-v1")),
+        label_selector=str(conv_raw.get("label_selector", "app.kubernetes.io/name={service}")),
+        values_files=tuple(conv_raw.get("values_files") or ["values.yaml", "values-{active_env}.yaml"]),
+        write_allowed_globs=tuple(conv_raw.get("write_allowed_globs") or [
+            "{workspace}/helm/**",
+            "{workspace}/docker/**",
+        ]),
+        write_denied_globs=tuple(conv_raw.get("write_denied_globs") or [
+            "{workspace}/tests/**",
+        ]),
+        registry=str(conv_raw.get("registry", "")),
+        image_tag=str(conv_raw.get("image_tag", "dev")),
+    )
+
+    env_raw = _require_dict(raw.get("environments", {}), "environments")
+    active_env = str(env_raw.get("active", "dev"))
+    environments: dict[str, Environment] = {}
+    for name, body in env_raw.items():
+        if name == "active":
+            continue
+        body = _require_dict(body, f"environments.{name}")
+        environments[name] = Environment(
+            name=name,
+            domain_suffix=str(body.get("domain_suffix", "cluster.local")),
+            arch=str(body.get("arch", "amd64")),
+            node_selectors=dict(body.get("node_selectors") or {}),
+        )
+    if active_env not in environments:
+        raise ConfigError(
+            f"environments.active={active_env!r} but no such environment defined"
+        )
+
+    checks_raw = _require_dict(raw.get("checks", {}), "checks")
+    static_raw = _require_dict(checks_raw.get("static", {}), "checks.static")
+    static_enabled: dict[str, bool] = {}
+    for name, body in static_raw.items():
+        body = body if isinstance(body, dict) else {"enabled": bool(body)}
+        static_enabled[name] = bool(body.get("enabled", True))
+    static = StaticChecks(_enabled=static_enabled)
+
+    runtime_raw = _require_dict(checks_raw.get("runtime", {}), "checks.runtime")
+    kw_raw = _require_dict(runtime_raw.get("kubectl_wait", {}), "checks.runtime.kubectl_wait")
+    kubectl_wait = KubectlWaitCheck(
+        enabled=bool(kw_raw.get("enabled", True)),
+        initial_wait_seconds=int(kw_raw.get("initial_wait_seconds", 60)),
+        terminal_grace_seconds=int(kw_raw.get("terminal_grace_seconds", 240)),
+    )
+    runtime = RuntimeChecks(
+        docker_build_push=bool(_require_dict(
+            runtime_raw.get("docker_build_push", {"enabled": True}),
+            "checks.runtime.docker_build_push",
+        ).get("enabled", True)),
+        helm_upgrade=bool(_require_dict(
+            runtime_raw.get("helm_upgrade", {"enabled": True}),
+            "checks.runtime.helm_upgrade",
+        ).get("enabled", True)),
+        kubectl_wait=kubectl_wait,
+        smoke_test=bool(_require_dict(
+            runtime_raw.get("smoke_test", {"enabled": True}),
+            "checks.runtime.smoke_test",
+        ).get("enabled", True)),
+    )
+
+    log_raw = _require_dict(raw.get("logging", {}), "logging")
+    logging_cfg = Logging(
+        dir=str(log_raw.get("dir", "logs/deploy")),
+        tail_chars=int(log_raw.get("tail_chars", 2000)),
+        retention_days=int(log_raw.get("retention_days", 30)),
+    )
+
+    orch_raw = _require_dict(raw.get("orchestration", {}), "orchestration")
+    orchestration = Orchestration(
+        max_runtime_retries=int(orch_raw.get("max_runtime_retries", 3)),
+    )
+
+    return Config(
+        cluster=cluster,
+        conventions=conv,
+        active_env=active_env,
+        environments=environments,
+        checks=Checks(static=static, runtime=runtime),
+        logging=logging_cfg,
+        orchestration=orchestration,
+        _source=source,
+    )
+
+
+def _resolve_path(explicit: Path | str | None) -> Path:
+    if explicit is not None:
+        return Path(explicit)
+    override = os.environ.get("HARNESS_CONFIG")
+    if override:
+        return Path(override)
+    return CONFIG_PATH_DEFAULT
+
+
+@lru_cache(maxsize=1)
+def _load_cached(source: Path) -> Config:
+    if not source.exists():
+        raise ConfigError(f"config not found: {source}")
     try:
-        return yaml.safe_load(_BUILD_CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return {}
+        raw = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as e:
+        raise ConfigError(f"failed to parse {source}: {e}") from e
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{source}: top-level must be a mapping")
+    return _parse(raw, source)
 
 
-_build = _parse_build()
+def load_config(path: Path | str | None = None) -> Config:
+    """Load ``config/harness.yaml`` from CWD (or explicit/env-overridden path).
 
-# artifact_prefix: 프로젝트별 아티팩트 루트 경로. build.yaml에서 읽음.
-ARTIFACT_PREFIX: str = _build.get("artifact_prefix", "edge-server/")
-
-
-def release_name(service_name: str) -> str:
-    """Helm release 이름 컨벤션: <service>-dev-v1"""
-    return f"{service_name}-dev-v1"
-
-
-def label_selector(service_name: str) -> str:
-    """kubectl label selector 컨벤션: app.kubernetes.io/name=<service>"""
-    return f"app.kubernetes.io/name={service_name}"
-
-_DEFAULTS = {
-    "domain_suffix": "cluster.local",
-    "arch": "amd64",
-    "kubeconfig": "",
-}
-
-
-def _parse() -> tuple[dict, str]:
-    """YAML을 1회 파싱해 (raw_data, active_env) 반환."""
-    if not _CONFIG_PATH.exists():
-        return {}, "dev"
-    try:
-        data = yaml.safe_load(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}, "dev"
-    if not isinstance(data, dict):
-        return {}, "dev"
-    return data, data.get("active", "dev")
-
-
-# 모듈 로드 시 YAML 1회만 파싱
-_raw, _active = _parse()
-
-# cluster.yaml 최상위 namespace 필드. 없으면 "custom" 고정.
-NAMESPACE: str = _raw.get("namespace", "custom")
-_cluster: dict = {**_DEFAULTS, **_raw.get(_active, {}), "_active": _active}
-_kubeconfig: str | None = (
-    str(Path(p).expanduser())
-    if (p := _cluster.get("kubeconfig", ""))
-    else None
-)
-
-
-def cluster_config() -> dict:
-    """현재 활성 클러스터 설정 반환."""
-    return _cluster
-
-
-def all_envs() -> dict[str, dict]:
-    """dev, prod 등 모든 환경 설정을 {name: config} 형태로 반환."""
-    return {
-        key: {**_DEFAULTS, **val}
-        for key, val in _raw.items()
-        if key != "active" and isinstance(val, dict)
-    }
-
-
-def kubeconfig_path() -> str | None:
-    """명시적 kubeconfig 경로. 비어있으면 None 반환."""
-    return _kubeconfig
-
-
-def build_cluster_env_section(include_authoring_hint: bool = True) -> str:
-    """Cluster Environments 마크다운 섹션 반환.
-
-    include_authoring_hint=True: developer용 (values-{env}.yaml 작성 요구사항 포함)
-    include_authoring_hint=False: verifier용 (도메인/환경 정보만)
+    Cached via ``@lru_cache``. Call :func:`load_config.cache_clear` in tests
+    when swapping the config file.
     """
-    active_env = cluster_config().get("_active", "dev")
-    envs = all_envs()
-    env_rows = "\n".join(
-        f"| `{n}` | `{c['domain_suffix']}` | `{c['arch']}` |"
-        for n, c in envs.items()
-    )
-    env_detail = "\n".join(
-        f"### `{n}` (`values-{n}.yaml`)\n"
-        f"- domain_suffix: `{c['domain_suffix']}`\n"
-        f"- arch: `linux/{c['arch']}`\n"
-        f"- DNS example: `<service>-headless.{NAMESPACE}.svc.{c['domain_suffix']}`"
-        for n, c in envs.items()
-    )
-    authoring = (
-        f"\n**You MUST write {', '.join(f'`values-{e}.yaml`' for e in envs)} for EVERY service.**\n"
-        "Each file overrides environment-specific values (domain, arch, resources).\n"
-        if include_authoring_hint else ""
-    )
-    return (
-        f"## Cluster Environments\n"
-        f"**Active for testing**: `{active_env}` "
-        f"(Static/Runtime Verifier will use `values-{active_env}.yaml`)\n"
-        f"{authoring}\n"
-        f"| env | domain_suffix | arch |\n"
-        f"|-----|--------------|------|\n"
-        f"{env_rows}\n\n"
-        f"{env_detail}"
-    )
+    return _load_cached(_resolve_path(path).resolve())
+
+
+# expose cache_clear for tests
+load_config.cache_clear = _load_cached.cache_clear  # type: ignore[attr-defined]

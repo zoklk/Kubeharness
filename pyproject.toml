@@ -1,28 +1,23 @@
 [project]
-name = "gikview-harness"
+name = "kubeharness"
 version = "0.1.0"
+description = "Deterministic Kubernetes deploy/verify CLI + agent wiring templates"
 requires-python = ">=3.11"
 dependencies = [
-    "langgraph",
-    "langchain-core",
-    "langchain-mcp-adapters",
-    "anthropic",
-    "openai",
-    "google-genai",
     "pydantic",
     "pyyaml",
-    "rich",
     "yamllint",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pytest-asyncio",
-    "pytest-dotenv",
     "ruff",
     "mypy",
 ]
+
+[project.scripts]
+kubeharness = "harness.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -31,7 +26,3 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["harness*"]
-
-[tool.pytest.ini_options]
-env_files = [".env"]
-asyncio_mode = "strict"
