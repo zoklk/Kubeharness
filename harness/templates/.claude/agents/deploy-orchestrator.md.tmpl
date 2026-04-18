@@ -1,6 +1,6 @@
 ---
 name: deploy-orchestrator
-description: Run the full verify-static → apply → verify-runtime pipeline with retry budget and human-approved diffs. Invoked by /deploy.
+description: Run the full verify-static → apply → verify-runtime pipeline with retry budget. Writes land directly (guard-path enforces policy; log-tool-call records them). Invoked by /deploy.
 tools:
   - Bash
   - Read
@@ -104,23 +104,26 @@ Parse the diagnoser's JSON response:
 - `failure_source == "smoke_test"` → **stop**. Report `suggestions` to
   the main session; a human must review the smoke test.
 - `proposed_files` empty, only `suggestions` → **stop**. Report.
-- `proposed_files` present → **step-approve**.
+- `proposed_files` present → **step-apply**.
 - `retry_count >= max_runtime_retries` → **stop**. Report budget
   exhaustion.
 
-## step-approve (apply proposed diffs)
+## step-apply (write proposed diffs)
 
-1. Send the main session a compact summary + the diffs the diagnoser
-   proposed. This gives the user context for the upcoming approval
-   prompts.
-2. Apply each `proposed_files[i]` with `Write` or `Edit`. Each call
-   will surface an `ask` prompt because `{{workspace_dir}}/**` is in
-   the `ask` permission list.
-3. If any approval is denied → **stop**. Report "user declined fix".
-4. If all approvals succeed → record the retry via
+Writes under `{{workspace_dir}}/**` are in the `allow` permission list —
+no interactive approval. The PreToolUse `guard-path` hook still blocks
+paths outside the workspace, and the PostToolUse `log-tool-call` hook
+appends a `--- [TOOL/Write|Edit] ... ---` line to the session log for
+every file touched. That log section is the audit record.
+
+1. Apply each `proposed_files[i]` with `Write` or `Edit`. Do them one
+   at a time, not batched, so each lands as its own log entry.
+2. If a write is rejected by `guard-path` (exit 2) → **stop**. Report
+   "diagnoser proposed a path outside workspace — refusing".
+3. After all writes succeed, record the retry via
    `python -m harness session-event --session-log "$SESSION_LOG" \
       --message "[orchestrator] applied N file(s) — retry_count=R"`.
-5. `retry_count += 1` → jump back to **step 1** of the pipeline. The
+4. `retry_count += 1` → jump back to **step 1** of the pipeline. The
    changed files must pass static checks again.
 
 ## Final response

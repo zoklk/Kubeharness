@@ -144,8 +144,8 @@ argparse 기반, 서브커맨드 6개: `init`, `verify-static`, `apply`, `verify
 
 두 개의 보조 서브커맨드는 orchestrator subagent 전용:
 
-- **`session-path --service <svc>`** — 표준 로그 경로 하나를 stdout 으로 찍고 종료. 파일은 만들지 않는다. orchestrator 가 이 값을 잡아두고 이후 `--session-log` 로 세 스테이지에 일관되게 넘긴다. env-prefix(`HARNESS_SESSION_LOG=... python …`) 를 쓰지 않기 위한 우회로 — Claude Code 의 퍼미션 매처가 env-prefix 된 커맨드를 `python -m harness:*` 로 매치 못 하기 때문.
-- **`session-event --session-log <path> --message <text>`** — 한 줄 자유 텍스트를 세션 로그에 append. orchestrator 의 retry count, approval granted 같은 non-subprocess 감사 이벤트용. `echo`/`printf` 를 allow list 에 추가할 필요 없게.
+- **`session-path --service <svc>`** — 표준 로그 경로 하나를 stdout 으로 찍고 종료. 파일은 만들지 않는다. **부수 효과**로 `.harness/current-session-log` 포인터 파일을 같은 경로로 덮어쓴다 — PostToolUse 훅(`log-tool-call.sh`)이 활성 세션 로그를 찾을 때 참조한다. orchestrator 가 이 값을 잡아두고 이후 `--session-log` 로 세 스테이지에 일관되게 넘긴다. env-prefix(`HARNESS_SESSION_LOG=... python …`) 를 쓰지 않기 위한 우회로 — Claude Code 의 퍼미션 매처가 env-prefix 된 커맨드를 `python -m harness:*` 로 매치 못 하기 때문.
+- **`session-event --session-log <path> --message <text>`** — 한 줄 자유 텍스트를 세션 로그에 append. orchestrator 의 retry count, 배너 같은 non-subprocess 감사 이벤트용. `echo`/`printf` 를 allow list 에 추가할 필요 없게.
 
 ### `init.py`
 
@@ -192,7 +192,9 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
   │             observations + proposed_files 를 JSON 으로 반환
   │
   │  proposed_files 가 비어있지 않으면:
-  ├─►  각각에 대해 Write(...) — `ask` 권한으로 사람 승인 프롬프트 발생
+  ├─►  각각에 대해 Write(...) — `allow` 권한으로 중단 없이 진행
+  │         PreToolUse(guard-path) 가 경로를 검증하고,
+  │         PostToolUse(log-tool-call) 가 세션 로그에 한 줄씩 감사 기록
   │
   │  retry_count += 1, verify-static 부터 루프 재진입 (max_runtime_retries 한도)
   │
@@ -244,14 +246,29 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
 ## 6. 세션 로그 규약
 
 - **경로 우선순위**: `--session-log <path>` CLI 플래그 > `$HARNESS_SESSION_LOG` env > 자동 생성 `logging.dir/<ts>-<service>-<stage>-standalone.log`. 세 개 다 없을 일은 없음 — 자동 생성이 항상 존재. orchestrator 는 `session-path` 로 경로를 한 번 받아 `--session-log` 로 세 스테이지에 공유한다.
-- **명령별 블록**:
+- **명령별 블록** (subprocess 호출):
   ```
   --- [label] $ <argv> ---
   <stdout, 비어있을 수 있음>
   <stderr, 비어있을 수 있음>
   [exit N] (duration: X.XXs)
   ```
-- **이벤트 라인**(`shell.write_session_event`): 불투명한 문자열을 그대로 기록. CLI 와 orchestrator subagent 가 사용 (`=== deploy svc @ ts ===`, `[orchestrator] applied N file(s)`).
+- **스테이지 배너**(`_cmd_verify_static`/`apply`/`verify-runtime` 가 `_stage_start_banner`/`_stage_end_banner` 로 찍음):
+  ```
+  ============================================================
+    STAGE | verify-static | emqx | 20260418-131413
+  ============================================================
+  ...
+  ------------------------------------------------------------
+    verify-static DONE | PASSED | 5 passed, 1 failed, 0 skipped
+  ------------------------------------------------------------
+  ```
+- **툴 콜 블록**(`log-tool-call.sh` PostToolUse 훅이 LLM 의 Write/Edit/Task/`mcp__kagent__*` 호출마다 append):
+  ```
+  --- [TOOL/Edit] 13:14:25 | ok | {workspace}/helm/emqx/values.yaml | lines_changed=3->5 ---
+  ```
+  훅은 `.harness/current-session-log` 포인터로 활성 로그를 찾는다. LLM 은 이 줄을 읽지 않는다 — 훅이 Claude Code 런타임에서 실행돼 토큰 비용 0.
+- **이벤트 라인**(`shell.write_session_event`): 불투명한 문자열을 그대로 기록. CLI 와 orchestrator subagent 가 사용 (`[orchestrator] applied N file(s)` 등).
 - **보관**: `logging.retention_days` 가 스키마에 선언돼 있지만 정리 로직은 아직 미구현(추후).
 
 세션 로그가 포스트모템의 진본. CLI JSON 응답은 요약이고, 긴 출력은 `logging.tail_chars` 에 맞춰 잘린다. **로그 파일 자체는 절대 자르지 않는다.**

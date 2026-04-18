@@ -120,8 +120,9 @@ my-infra/
     │                           #      phase-spec-reader · cluster-env-inject ·
     │                           #      runtime-diagnosis
     └── hooks/
-        ├── guard-path.sh       # workspace 밖 Write/Edit 차단
-        └── verify-on-write.sh  # 편집 직후 yamllint · hadolint 즉시 피드백
+        ├── guard-path.sh       # workspace 밖 Write/Edit 차단 (PreToolUse)
+        ├── verify-on-write.sh  # 편집 직후 yamllint · hadolint 즉시 피드백 (PostToolUse)
+        └── log-tool-call.sh    # Write/Edit/Task/kagent 호출을 세션 로그에 기록 (PostToolUse)
 ```
 
 이후 배포할 수 있는 상태로 만들려면:
@@ -131,7 +132,7 @@ my-infra/
 2. `context/conventions.md`, `context/tech_stack.md` 를 **본인 프로젝트 맥락으로 덮어 쓰기** — 템플릿 상태로 두면 에이전트가 엉뚱한 전제를 가져감
 3. `context/phases/_template.md` 를 복사해 `context/phases/<phase>.md` 작성. 각 sub_goal 의 `**artifacts**:` 목록이 에이전트가 만들 파일 종류를 결정
 4. 에이전트 루프(4a) 또는 CLI 직접 호출(4b) 로 배포 실행
-5. (GitHub 연동 시) `git init` · `.gitignore` 에 `logs/`, `.claude/settings.local.json` 추가 후 첫 커밋. `.claude/` 본체는 팀 공용이니 커밋 대상
+5. (GitHub 연동 시) `git init` · `.gitignore` 에 `logs/`, `.harness/`, `.claude/settings.local.json` 추가 후 첫 커밋. `.claude/` 본체는 팀 공용이니 커밋 대상 (`.harness/` 는 `session-path` 가 쓰는 런타임 포인터 디렉터리라 gitignore)
 
 `harness/`, `docs/` 은 생기지 **않습니다** — 그건 kubeharness 레포 자체의 파일이고, 소비자 프로젝트는 `pip install` 된 패키지를 `python -m harness` 로 호출만 합니다. 템플릿 원본은 `harness/templates/` 로 패키지에 번들돼 있습니다.
 
@@ -143,7 +144,7 @@ my-infra/
 /deploy <phase> <sub_goal>     # 예: /deploy observability prometheus
 ```
 
-을 실행하면 orchestrator 가 `context/phases/<phase>.md` 의 해당 sub_goal 섹션에서 `service_name` 을 읽어 내고, verify-static → apply → verify-runtime 을 재시도 버짓과 함께 돌립니다. runtime 실패는 read-only 인 `runtime-diagnoser` 가 진단하고, 제안된 파일 수정은 **`ask` 권한**을 거치므로 모든 Write 마다 사람 승인 프롬프트가 뜹니다. 전체 규약은 `init` 이 생성하는 `AGENTS.md` 에 정리돼 있습니다.
+을 실행하면 orchestrator 가 `context/phases/<phase>.md` 의 해당 sub_goal 섹션에서 `service_name` 을 읽어 내고, verify-static → apply → verify-runtime 을 재시도 버짓과 함께 돌립니다. runtime 실패는 read-only 인 `runtime-diagnoser` 가 진단하고, 제안된 파일 수정은 `{workspace_dir}/**` 범위에서 **중단 없이** 적용됩니다 — PreToolUse `guard-path` 훅이 경로를 검증하고, PostToolUse `log-tool-call` 훅이 모든 Write/Edit/Task/kagent 호출을 세션 로그에 남겨 사후 감사가 가능합니다 (LLM 은 이 로그를 못 읽으니 토큰 영향 없음). 전체 규약은 `init` 이 생성하는 `AGENTS.md` 에 정리돼 있습니다.
 
 Codex CLI 등 다른 에이전트 러너는 같은 `AGENTS.md` 를 읽습니다. `.claude/` 트리는 **Claude Code 전용 wiring 예시**이니, 다른 CLI 를 쓰면 무시하세요.
 

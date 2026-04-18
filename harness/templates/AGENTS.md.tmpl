@@ -45,10 +45,11 @@ task, forget it when done. Do **not** copy skill content into this file.
 
 - **`deploy-orchestrator`** — the only way to run a full deploy cycle.
   Invoked by `/deploy <phase> <sub_goal>`. Owns the verify-static →
-  apply → verify-runtime loop with retry budget and human-approved
-  diffs. Resolves `service_name` from
-  `context/phases/<phase>.md` → `## Sub-goal: <sub_goal>`, so phase
-  docs must exist before running.
+  apply → verify-runtime loop with a retry budget. Applies diagnoser
+  proposals directly — the `guard-path` hook enforces path policy, and
+  every tool call is recorded to the session log for audit. Resolves
+  `service_name` from `context/phases/<phase>.md` → `## Sub-goal: <sub_goal>`,
+  so phase docs must exist before running.
 - **`runtime-diagnoser`** — read-only Kubernetes diagnosis. Call via
   `Task(subagent_type="runtime-diagnoser", prompt=...)` when:
   - the user asks something like *"why is prometheus flaky?"*, or
@@ -68,8 +69,10 @@ Never call them from each other except in the documented direction
 2. Load `helm-chart-author` / `docker-author` / `cluster-env-inject` as
    the artifacts dictate.
 3. Write `{{workspace_dir}}/helm/<service>/` and/or
-   `{{workspace_dir}}/docker/<service>/` (writes require human approval
-   per `ask` permission).
+   `{{workspace_dir}}/docker/<service>/`. Writes land immediately —
+   `guard-path` blocks any path outside the workspace, and each
+   Write/Edit is appended to the active session log by the
+   `log-tool-call` hook.
 4. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
 
 ### Iterate on an existing service

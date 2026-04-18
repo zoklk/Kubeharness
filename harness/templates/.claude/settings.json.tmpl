@@ -3,6 +3,8 @@
     "allow": [
       "Bash(python -m harness:*)",
       "Read(**)",
+      "Write({{workspace_dir}}/**)",
+      "Edit({{workspace_dir}}/**)",
       "mcp__kagent__k8s_get_resources",
       "mcp__kagent__k8s_get_resource_yaml",
       "mcp__kagent__k8s_describe_resource",
@@ -34,8 +36,6 @@
       "Bash(docker:*)"
     ],
     "ask": [
-      "Write({{workspace_dir}}/**)",
-      "Edit({{workspace_dir}}/**)",
       "mcp__kagent__k8s_execute_command"
     ]
   },
@@ -53,6 +53,12 @@
         "matcher": "Write|Edit",
         "hooks": [
           {"type": "command", "command": "bash .claude/hooks/verify-on-write.sh"}
+        ]
+      },
+      {
+        "matcher": "Write|Edit|Task|mcp__kagent__.*",
+        "hooks": [
+          {"type": "command", "command": "bash .claude/hooks/log-tool-call.sh"}
         ]
       }
     ]

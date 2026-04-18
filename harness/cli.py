@@ -51,6 +51,21 @@ from harness.static import CheckResult
 # ─── JSON helpers ────────────────────────────────────────────────────────────
 
 
+BANNER_WIDTH = 60
+
+
+def _stage_start_banner(stage: str, service: str) -> str:
+    line = "=" * BANNER_WIDTH
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    return f"\n{line}\n  STAGE | {stage} | {service} | {ts}\n{line}\n"
+
+
+def _stage_end_banner(stage: str, summary: str, passed: bool) -> str:
+    line = "-" * BANNER_WIDTH
+    status = "PASSED" if passed else "FAILED"
+    return f"\n{line}\n  {stage} DONE | {status} | {summary}\n{line}\n"
+
+
 def _summarize(checks: Sequence[CheckResult]) -> str:
     passed = sum(1 for c in checks if c.status == "pass")
     failed = sum(1 for c in checks if c.status == "fail")
@@ -133,54 +148,69 @@ def _prepare_session_log(
 # ─── subcommand handlers ─────────────────────────────────────────────────────
 
 
-def _cmd_verify_static(args: argparse.Namespace) -> int:
+def _run_stage(
+    args: argparse.Namespace,
+    stage: str,
+    checks_fn,
+) -> int:
     try:
         cfg = load_config(args.config)
     except ConfigError as e:
         return _config_error(str(e))
-    log = _prepare_session_log(cfg, "verify-static", args.service, args.session_log)
-    write_session_event(f"=== verify-static {args.service} @ {time.strftime('%Y%m%d-%H%M%S')} ===")
-    checks = static.run_static(args.service, cfg)
-    write_session_event(f"[verify-static] summary: {_summarize(checks)}")
-    return _emit(service=args.service, stage="verify-static", checks=checks, session_log=log)
+    log = _prepare_session_log(cfg, stage, args.service, args.session_log)
+    write_session_event(_stage_start_banner(stage, args.service))
+    checks = checks_fn(cfg)
+    summary = _summarize(checks)
+    passed = _overall_passed(checks)
+    write_session_event(_stage_end_banner(stage, summary, passed))
+    return _emit(service=args.service, stage=stage, checks=checks, session_log=log)
+
+
+def _cmd_verify_static(args: argparse.Namespace) -> int:
+    return _run_stage(
+        args,
+        "verify-static",
+        lambda cfg: static.run_static(args.service, cfg),
+    )
 
 
 def _cmd_apply(args: argparse.Namespace) -> int:
-    try:
-        cfg = load_config(args.config)
-    except ConfigError as e:
-        return _config_error(str(e))
-    log = _prepare_session_log(cfg, "apply", args.service, args.session_log)
-    write_session_event(f"=== apply {args.service} @ {time.strftime('%Y%m%d-%H%M%S')} ===")
-    checks = runtime.apply(args.service, cfg)
-    write_session_event(f"[apply] summary: {_summarize(checks)}")
-    return _emit(service=args.service, stage="apply", checks=checks, session_log=log)
+    return _run_stage(
+        args,
+        "apply",
+        lambda cfg: runtime.apply(args.service, cfg),
+    )
 
 
 def _cmd_verify_runtime(args: argparse.Namespace) -> int:
-    try:
-        cfg = load_config(args.config)
-    except ConfigError as e:
-        return _config_error(str(e))
-    log = _prepare_session_log(cfg, "verify-runtime", args.service, args.session_log)
-    write_session_event(f"=== verify-runtime {args.service} @ {time.strftime('%Y%m%d-%H%M%S')} ===")
-    checks = runtime.verify_runtime(
-        args.service, cfg, phase=args.phase, sub_goal=args.sub_goal,
+    return _run_stage(
+        args,
+        "verify-runtime",
+        lambda cfg: runtime.verify_runtime(
+            args.service, cfg, phase=args.phase, sub_goal=args.sub_goal,
+        ),
     )
-    write_session_event(f"[verify-runtime] summary: {_summarize(checks)}")
-    return _emit(
-        service=args.service, stage="verify-runtime", checks=checks, session_log=log,
-    )
+
+
+SESSION_POINTER = Path(".harness/current-session-log")
 
 
 def _cmd_session_path(args: argparse.Namespace) -> int:
-    """Print a canonical per-deploy session log path. Does not create the file."""
+    """Print a canonical per-deploy session log path.
+
+    Also writes the chosen path to ``.harness/current-session-log`` so
+    PostToolUse hooks can locate the active log without relying on
+    environment inheritance. Does not create the log file itself — that
+    happens lazily on the first subprocess append.
+    """
     try:
         cfg = load_config(args.config)
     except ConfigError as e:
         return _config_error(str(e))
     ts = time.strftime("%Y%m%d-%H%M%S")
     path = Path(cfg.logging.dir) / f"{ts}-{args.service}.log"
+    SESSION_POINTER.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_POINTER.write_text(str(path) + "\n", encoding="utf-8")
     sys.stdout.write(str(path) + "\n")
     sys.stdout.flush()
     return 0

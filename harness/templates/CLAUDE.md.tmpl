@@ -10,9 +10,12 @@ should honor.
   explicitly disallowed by `.claude/settings.json` (except through
   `python -m harness:*`). If a task seems to need a direct call, you
   are missing a subcommand — ask the user.
-- **Writes go through the `ask` permission.** Any `Write` or `Edit`
-  under `{{workspace_dir}}/**` triggers a human approval prompt. Do
-  not attempt to bypass or batch around this.
+- **Writes under `{{workspace_dir}}/**` go through without an approval
+  prompt.** The PreToolUse `guard-path` hook enforces that only allowed
+  paths are writable, and the PostToolUse `log-tool-call` hook records
+  every Write/Edit/Task/kagent call to the session log. You get no
+  interactive gate — the logs are the audit trail. Keep edits small and
+  intentional so the log stays readable.
 - **Never edit** `harness/**`, `.claude/**`, `config/**`, `context/**`,
   `docs/**`. These are denied at the settings layer and by the
   PreToolUse hook.

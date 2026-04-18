@@ -16,7 +16,7 @@ Owned by `deploy-orchestrator`:
 - session log setup (`logs/deploy/<ts>-<service>.log`)
 - `python -m harness verify-static / apply / verify-runtime` in order
 - failure dispatch to `runtime-diagnoser` (read-only) on `verify-runtime` fail
-- human-approved diff application under `{{workspace_dir}}/**`
+- direct diff application under `{{workspace_dir}}/**` (guard-path enforces path policy; log-tool-call records every write)
 - retry budget from `config/harness.yaml` → `orchestration.max_runtime_retries`
 
 ## Usage
