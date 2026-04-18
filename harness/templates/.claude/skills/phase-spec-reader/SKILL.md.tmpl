@@ -58,25 +58,24 @@ Requirements narrative describing what this sub_goal delivers:
 
    **Optional (process if present):**
    - `**node_category**: <category>` — see `cluster-env-inject`.
-   - `**ports**: [<port>/<proto>, ...]` or `[none]` — expose on
-     Service/containerPorts when writing Helm templates.
-   - `**replicas**: <n>` — set `replicaCount` (or equivalent) in
-     `values.yaml`. Default to 1 if field is absent or parenthesized.
-   - `**operational_notes**: <bullets>` or `[none]` — domain
-     constraints not derivable from code. Carry into your working
-     memory when authoring; apply to chart values as appropriate.
    - `**references**: [<context/knowledge/*.md>, ...]` or `[none]`
      — see next step.
 
 4. **Load references** (if `**references**:` is non-`[none]`): Read
    each listed `context/knowledge/*.md` file **before** writing any
-   artifact. These describe clustering/storage/port constraints that
-   are invisible from the upstream chart alone. Do not proceed to
-   chart authoring until these are loaded.
+   artifact. These describe clustering/storage/port/discovery
+   constraints of the **technology** that are invisible from the
+   upstream chart alone. Do not proceed to chart authoring until
+   these are loaded.
 
-5. The narrative paragraph below the bold fields is the functional
-   requirement. Keep it in your working memory while authoring; do
-   not copy it verbatim into chart values.
+5. **Parse the narrative bullets** below the bold fields. This is
+   where project-specific requirements live — ports and their roles,
+   replica counts, resource sizes, retention, optional features.
+   Sub-bullets under headings like `**Port**:` or `**리소스**:`
+   (resources) carry concrete numbers you must translate into
+   `containerPorts` / `Service.ports` / `resources.requests|limits`
+   / `replicaCount` in the Helm chart. Do not copy narrative text
+   verbatim into values — extract the data.
 
 ## What if `**artifacts**:` is missing?
 

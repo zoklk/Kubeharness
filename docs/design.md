@@ -6,6 +6,23 @@
 
 ---
 
+## 핵심 철학
+
+Kubeharness 가 노리는 한 가지는 **개발 + 배포의 결정적 워크플로우**다. 코드를 쓰는 단계와 클러스터에 올리는 단계가 동일한 스펙 · 동일한 검증을 공유해야, "로컬에선 됐는데" 라는 비결정성이 사라진다.
+
+방법론은 쿠버네티스의 선언적 관리에서 빌려 왔다. K8s 가 desired state 를 선언하면 컨트롤러가 현재 상태를 거기에 수렴시키듯, Kubeharness 는 **사용 기술 + 목표 상태** 두 축을 입력으로 받는다:
+
+- **사용 기술** — `context/knowledge/<tech>.md` 에 기술별 운영 제약(클러스터링, 스토리지, 포트/프로토콜, 알려진 함정)을 고정한다. upstream 문서에서 추론이 불가능한 도메인 지식의 저장소.
+- **목표 상태** — `context/phases/<phase>.md` 의 각 sub_goal 이 "이 배포가 충족해야 할 기능·운영 요구사항"을 bullet 으로 선언한다. 포트 역할, replica 수, retention, 리소스 크기 등.
+
+에이전트는 이 두 입력을 읽어 Helm chart · Dockerfile · values 파일을 **결정적으로 생성** 하고, harness CLI 는 생성 결과가 선언된 목표 상태를 실제로 만족하는지 `verify-static` · `apply` · `verify-runtime` 세 단계로 **결정적으로 검증** 한다. 코드 작성부터 클러스터 도달까지의 경로가 한 흐름으로 묶인다.
+
+목표 상태가 "충족됐다"는 판정의 최종 수단은 **smoke-test** 다. Pod Ready · 리소스 할당 같은 인프라 레벨 조건은 `verify-runtime` 의 kubectl wait 이 걸러 내지만, "이 기술이 이 프로젝트에서 원하는 대로 동작하는가" — 예: MQTT 브로커가 실제로 publish/subscribe 를 처리하는가, DB 가 기대한 스키마로 쿼리를 받는가 — 는 클러스터 상태만 봐서는 알 수 없다. 그래서 각 sub_goal 마다 `workspace/tests/<phase>/smoke-test-<service>.sh` 를 두고, narrative bullet 에 선언된 기능 요구사항을 검사하는 명시적 스크립트로 번역한다. 스크립트의 exit code 가 목표 상태 수렴 여부를 결정한다 — 선언적 스펙과 실제 동작을 연결하는 결정적 피드백 루프.
+
+아래 §1 "설계 목표" 는 이 철학을 실현하기 위해 구현 레벨에서 지키는 규칙들이다.
+
+---
+
 ## 1. 설계 목표
 
 1. **결정적 CLI, 내부에 LLM 없음.** harness 는 검증 가능한 부수 효과(체크 실행, 배포 실행, 파드 대기)만 소유한다. 모든 판단은 외부 에이전트 CLI(Claude Code, Codex)에서 일어난다.

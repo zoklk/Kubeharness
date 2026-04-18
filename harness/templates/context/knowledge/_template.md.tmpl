@@ -1,67 +1,71 @@
-# <technology> — 운영 지식 메모
+# <Technology> Knowledge
 
-이 파일은 LLM 이 `{{workspace_dir}}/helm/<service>/` 또는
-`{{workspace_dir}}/docker/<service>/` 아래 아티팩트를 작성하기 전에
-읽는 도메인 지식 저장소입니다. **phase-spec-reader** 가 sub_goal 의
-`**references**:` 필드에서 이 파일 경로를 발견하면 자동으로 Read 합니다.
+> 이 문서는 `{{workspace_dir}}/helm/<service>/` · `{{workspace_dir}}/docker/<service>/`
+> 아티팩트를 작성하는 LLM 에 주입됩니다. 모든 설정값은 이 프로젝트에서
+> 실제로 검증된 것이어야 합니다. `context/phases/<phase>.md` 의 sub_goal
+> 이 `**references**:` 로 이 파일을 가리키면 phase-spec-reader 가
+> 자동으로 Read 합니다. runtime-diagnoser 도 실패 진단 시 이 파일을
+> 먼저 참조합니다.
 
 이 파일을 `<technology>.md` (예: `emqx.md`, `prometheus.md`) 로
-복사한 뒤 해당 기술의 **코드만 봐선 추론할 수 없는** 제약과
-지식을 채우세요. 복사하지 않은 원본 `_template.md` 는 참조 대상이
-아닙니다.
+복사한 뒤 해당 기술 맥락에 맞게 채우세요. 복사하지 않은 원본
+`_template.md` 는 참조 대상이 아닙니다. 해당 기술에 **정말로
+해당 사항이 없는 섹션은 삭제**하세요 — 빈 섹션은 "정보 없음"
+이 아니라 "아직 안 채웠음" 으로 오해됩니다.
 
----
+## 이미지 / 버전
 
-## 언제 읽어야 하는가
+**채택**: `<registry>/<image>:<tag>` (예: `docker.io/emqx/emqx:5.8.6`)
 
-<LLM 이 이 파일을 필요로 하는 상황 한두 줄. 예:>
+이 특정 버전·태그를 선택한 이유를 한 단락으로 기록합니다 — 라이선스
+변경, API breaking change, 보안 CVE 노출, 내부 종속성 호환 등. "최신"
+을 쓰지 않는 경우에는 **왜** 를 반드시 남기세요. 향후 업그레이드
+판단의 근거가 됩니다.
 
-- `<technology>` 를 클러스터링 모드로 올릴 때
-- `values.yaml` 의 `persistence`, `service.type`, `podAntiAffinity`
-  섹션을 채울 때
+<Helm chart 를 사용하는 경우:>
+Helm chart: `<chart-name>` `<version>` (repo: `<repo-url>`)
 
-## 클러스터링 / 디스커버리
+## 주요 설정
 
-<피어 검색 / 쿼럼 / 리더 선출 관련 제약. 예:>
+이 기술을 **정상 동작시키기 위해 반드시 필요한** 비자명 설정을 코드
+블록 + 주석으로 기록합니다. 차트 기본값만으론 안 뜨거나, 뜨더라도
+한두 번 재시작 후 깨지는 값들 — 즉 "다음 담당자가 값만 보고선 왜
+그렇게 됐는지 추측할 수 없는" 설정이 여기 대상입니다.
 
-- `cluster.discovery_strategy: dns` + `dns.type: srv` 필수
-- headless Service (`clusterIP: None`) 가 있어야 SRV 레코드가 생성됨
-- pod 이름이 `<release>-<N>` 으로 안정적이어야 하므로 StatefulSet 사용
-- 홀수 노드 권장 (split-brain 방지)
+```yaml
+# values.yaml (공통)
+<config-group>:
+  <key>: "<value>"   # <왜 이 값이 필요한가 한 줄>
+  <key>: "<value>"   # <다른 값과의 상호 의존성이 있다면 명시>
+```
 
-## 스토리지
+여러 블록이 필요하면 `# values.yaml`, `# values-prod.yaml` 등으로
+소제목을 나눠 분리합니다. 긴 설정은 파일 자체에 주석을 박지 말고
+여기에 주석으로 남기세요 — 차트 values 는 깨끗하게 유지.
 
-<PVC / storageClass / 볼륨 모드 관련 제약. 예:>
+## 알려진 주의사항
 
-- 데이터 디렉터리 `/opt/<tech>/data` 에 RWO PVC 필요
-- 환경별 storageClass 는 `environments.<env>` 에서 주입
-- 백업 정책: <있다면 명시>
+이 기술을 운영하며 실제로 겪거나 공식 문서에 명시된 함정. 각 bullet
+은 **증상 → 원인 → 해결** 순서로 써서 runtime-diagnoser 가 실패 로그
+를 보고 매칭할 수 있게 합니다.
 
-## 네트워킹 · 포트 · 프로토콜
+- **<증상 또는 에러 메시지 키워드>**: <원인 한 줄>. <해결 / 회피법 한 줄>.
+- **<다른 증상>**: <원인>. <해결>.
+- **<구성 제약>**: <어떤 설정을 함께 두지 않으면 실패하는가>. <함께 둬야 할 것>.
 
-<특수 포트 / 프로토콜 / NetworkPolicy 요구사항. 예:>
+증상이 없는 "알면 좋은 팁" 은 이 섹션 말고 README 이나 comment 로.
 
-- 클라이언트: 1883 (MQTT), 8883 (MQTT/TLS)
-- 내부 클러스터: 4370 (ecp), 5369 (epmd) — pod 간 허용 필수
-- 외부 노출은 4번 포트 (HTTP dashboard) 만
+## 환경별 분리 필요 항목
 
-## 버전별 주의
+환경마다 달라야 하는 값 (dev vs prod, active_env 별) 을 표로 정리합니다.
+`values-<env>.yaml` 또는 `cluster-env-inject` 가 채울 항목을 한 눈에
+보기 위함.
 
-<특정 버전에서 알려진 이슈나 breaking change. 예:>
+| 항목 | dev | prod |
+|------|-----|------|
+| `<config.key>` | `<dev value>` | `<prod value>` |
+| `resources.requests.memory` | `<value>` | `<value>` |
+| `replicaCount` | `<value>` | `<value>` |
 
-- 5.8 이상: `mqtt.max_packet_size` 기본값 변경, 1MB 이상 시 명시 필요
-- 4.x → 5.x: config 포맷이 Erlang → HOCON 으로 변경
-
-## 보안 · 권한
-
-<RBAC / SecurityContext / secrets 관련. 예:>
-
-- 컨테이너 user: uid 1000 (root 금지)
-- `/etc/<tech>/password` 는 Secret 으로 마운트, values 에 평문 금지
-
-## 참고
-
-<공식 docs / 이슈 / 내부 러닝 링크. 예:>
-
-- https://www.emqx.io/docs/en/v5/deploy/cluster/dns.html
-- 이전 on-call 회고: <사내 문서 링크>
+환경이 셋 이상이면 열을 추가합니다. 환경별로 달라질 값이 없으면
+"환경별 차이 없음" 한 줄로 대체하거나 섹션 자체를 삭제하세요.

@@ -58,10 +58,11 @@ Optional:
 2. **Load domain knowledge.** If the Task prompt carries a `phase` /
    `sub_goal` (or `sub_goal_spec`), `Read context/phases/<phase>.md`,
    find the sub_goal's `**references**:` field, and `Read` every
-   `context/knowledge/*.md` path it lists. Also check
-   `**operational_notes**:` — constraints there often point directly
-   at the failure root cause. See the `runtime-diagnosis` skill's
-   "Domain knowledge before web search" section for precedence rules.
+   `context/knowledge/*.md` path it lists. Scan the sub_goal's
+   narrative bullets too — port roles, retention, resource sizing
+   often name the exact constraint that's being violated. See the
+   `runtime-diagnosis` skill's "Domain knowledge before web search"
+   section for precedence rules.
 3. Classify the failure into `failure_source`:
    - `implementation` — chart values, Dockerfile, or image content
      wrong. Fixable with a file edit.
