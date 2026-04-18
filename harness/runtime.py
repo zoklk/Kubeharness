@@ -19,6 +19,8 @@ Preserved from the legacy ``runtime_gates.py`` (refactor.md §21):
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
 
 import yaml
@@ -197,7 +199,7 @@ def _chart_has_workloads(rs: ResolvedService, cfg: Config) -> bool:
         "-n", rs.namespace,
         *_values_args(rs),
     ]
-    r = shell.run(cmd, label="verify-runtime/helm_template")
+    r = shell.run(cmd, label="verify-runtime/helm_template", log_stdout=False)
     if not r.ok:
         return True
     try:
@@ -207,6 +209,27 @@ def _chart_has_workloads(rs: ResolvedService, cfg: Config) -> bool:
         )
     except yaml.YAMLError:
         return True
+
+
+def _pods_sidecar_path() -> Path | None:
+    sess = os.environ.get("HARNESS_SESSION_LOG")
+    if not sess:
+        return None
+    stem = Path(sess).with_suffix("")
+    return stem.with_name(f"{stem.name}-pods-{time.strftime('%H%M%S')}.json")
+
+
+def _pods_summary(items: list) -> str:
+    if not items:
+        return "Pods (0): none found"
+    parts: list[str] = []
+    for pod in items:
+        name = pod.get("metadata", {}).get("name", "?")
+        phase = pod.get("status", {}).get("phase", "?")
+        cstatuses = pod.get("status", {}).get("containerStatuses", []) or []
+        ready = "Ready" if cstatuses and all(cs.get("ready", False) for cs in cstatuses) else "NotReady"
+        parts.append(f"{name} {phase}/{ready}")
+    return f"Pods ({len(items)}): " + ", ".join(parts)
 
 
 def _detect_terminal_failure(
@@ -221,6 +244,8 @@ def _detect_terminal_failure(
             "-o", "json",
         ],
         label="verify-runtime/kubectl_get_pods",
+        log_stdout=False,
+        stdout_sidecar=_pods_sidecar_path(),
     )
     if not r.ok:
         return False, ""
@@ -228,6 +253,7 @@ def _detect_terminal_failure(
         items = json.loads(r.stdout).get("items", [])
     except (json.JSONDecodeError, AttributeError):
         return False, ""
+    shell.write_session_event(_pods_summary(items))
     parts: list[str] = []
     for pod in items:
         pname = pod.get("metadata", {}).get("name", "?")

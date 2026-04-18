@@ -53,6 +53,9 @@ def _append_session(
     label: str | None,
     command_str: str,
     result: RunResult,
+    *,
+    log_stdout: bool = True,
+    stdout_sidecar: Path | None = None,
 ) -> None:
     path = _session_log_path()
     if not path:
@@ -61,7 +64,13 @@ def _append_session(
     header = f"--- [{label or 'cmd'}] $ {command_str} ---\n"
     body_parts: list[str] = []
     if result.stdout:
-        body_parts.append(result.stdout.rstrip("\n"))
+        if not log_stdout:
+            if stdout_sidecar is not None:
+                body_parts.append(f"[stdout -> {stdout_sidecar}]")
+            else:
+                body_parts.append(f"[stdout suppressed: {len(result.stdout)} bytes]")
+        else:
+            body_parts.append(result.stdout.rstrip("\n"))
     if result.stderr:
         body_parts.append(result.stderr.rstrip("\n"))
     body = ("\n".join(body_parts) + "\n") if body_parts else ""
@@ -78,11 +87,20 @@ def run(
     label: str | None = None,
     env: dict[str, str] | None = None,
     stdin: str | None = None,
+    log_stdout: bool = True,
+    stdout_sidecar: Path | None = None,
 ) -> RunResult:
     """Execute ``cmd`` and return a :class:`RunResult`.
 
     If ``HARNESS_SESSION_LOG`` is set, stdout/stderr are appended to that file
     with a section header regardless of exit code. No per-tool log files.
+
+    ``log_stdout=False`` replaces the stdout body in the session log with a
+    one-line placeholder — use for commands whose stdout is large but
+    re-derivable from repo state (e.g. ``helm template``). ``stdout_sidecar``,
+    if set, additionally writes raw stdout to that file and references it in
+    the session log, for commands whose stdout is needed for later analysis
+    but too large to embed inline (e.g. ``kubectl get pods -o json``).
     """
     command_str = " ".join(cmd)
     started = time.monotonic()
@@ -119,7 +137,16 @@ def run(
             stderr=f"command not found: {e}",
             duration=time.monotonic() - started,
         )
-    _append_session(label, command_str, result)
+    if stdout_sidecar is not None and result.stdout:
+        stdout_sidecar.parent.mkdir(parents=True, exist_ok=True)
+        stdout_sidecar.write_text(result.stdout, encoding="utf-8")
+    _append_session(
+        label,
+        command_str,
+        result,
+        log_stdout=log_stdout,
+        stdout_sidecar=stdout_sidecar if (stdout_sidecar and result.stdout) else None,
+    )
     return result
 
 

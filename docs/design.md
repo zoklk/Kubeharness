@@ -253,6 +253,15 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
   <stderr, 비어있을 수 있음>
   [exit N] (duration: X.XXs)
   ```
+  stdout 이 크면서 **재파생 가능**한 명령(`helm template`)은
+  `shell.run(..., log_stdout=False)` 로 본문을
+  `[stdout suppressed: N bytes]` 한 줄로 대체한다. stdout 이 크지만
+  **나중에 보고 싶은** 명령(`kubectl get pods -o json`)은 같은 옵션에
+  `stdout_sidecar=<path>` 를 추가해 원본 전체를 사이드카 파일
+  (`logs/deploy/<ts>-<svc>-pods-<HHMMSS>.json`)로 덤프하고, 세션 로그엔
+  `[stdout -> <path>]` 포인터 한 줄만 남긴다. `kubectl get pods` 는
+  이어서 `Pods (N): pod-0 Running/Ready, ...` 요약 이벤트 라인도 찍는다
+  (아래 "이벤트 라인" 참고).
 - **스테이지 배너**(`_cmd_verify_static`/`apply`/`verify-runtime` 가 `_stage_start_banner`/`_stage_end_banner` 로 찍음):
   ```
   ============================================================

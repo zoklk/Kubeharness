@@ -61,6 +61,38 @@ def test_write_session_event(session_log: Path):
     assert "[orchestrator] started" in session_log.read_text()
 
 
+def test_run_log_stdout_false_suppresses_body(session_log: Path):
+    r = shell.run(
+        ["sh", "-c", 'printf "$PAYLOAD"'],
+        env={"PAYLOAD": "SECRET_BODY_OUTPUT"},
+        label="test/quiet",
+        log_stdout=False,
+    )
+    assert r.ok
+    assert r.stdout == "SECRET_BODY_OUTPUT"
+    content = session_log.read_text()
+    assert "SECRET_BODY_OUTPUT" not in content
+    assert "[stdout suppressed: 18 bytes]" in content
+
+
+def test_run_stdout_sidecar_writes_file_and_logs_pointer(
+    session_log: Path, tmp_path: Path
+):
+    sidecar = tmp_path / "pods.json"
+    r = shell.run(
+        ["sh", "-c", 'printf "$PAYLOAD"'],
+        env={"PAYLOAD": "SIDECAR_ONLY_PAYLOAD"},
+        label="test/sidecar",
+        log_stdout=False,
+        stdout_sidecar=sidecar,
+    )
+    assert r.ok
+    assert sidecar.read_text() == "SIDECAR_ONLY_PAYLOAD"
+    content = session_log.read_text()
+    assert "SIDECAR_ONLY_PAYLOAD" not in content
+    assert f"[stdout -> {sidecar}]" in content
+
+
 def test_custom_env_merged_with_os_env(session_log: Path, monkeypatch):
     monkeypatch.setenv("OUTER", "set-outside")
     r = shell.run(
