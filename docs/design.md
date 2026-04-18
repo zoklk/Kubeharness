@@ -28,7 +28,7 @@ harness/
 ├── static.py       # 배포 전 체크 + 레지스트리 + 감지 게이트
 ├── runtime.py      # apply + verify_runtime (kubectl wait, smoke test)
 ├── cli.py          # argparse, JSON 응답, exit code, subcommand 디스패치
-└── init.py         # 템플릿 스캐폴드, {{var}} 치환
+└── init.py         # 템플릿 스캐폴드 + 업데이트, {{var}} 치환
 ```
 
 총 6개. 변경사항이 이 중 하나에 깔끔히 들어맞지 않으면, 변경의 모양 자체가 잘못됐을 가능성이 높다.
@@ -149,13 +149,17 @@ argparse 기반, 서브커맨드 6개: `init`, `verify-static`, `apply`, `verify
 
 ### `init.py`
 
-stdlib 만 쓰는 템플릿 복사기. 패키지 내부에 번들된 `harness/templates/` 를 걸어 다니며 `--dest` 로 복사하고, 이름이 `.tmpl` 로 끝나는 파일에 3가지 치환을 적용:
+두 서브커맨드가 한 모듈에서 나온다: **init** (스캐폴드) 과 **update** (하네스 소유 파일만 덮어쓰기).
+
+**init** 은 stdlib 만 쓰는 템플릿 복사기. 패키지 내부에 번들된 `harness/templates/` 를 걸어 다니며 `--dest` 로 복사하고, 이름이 `.tmpl` 로 끝나는 파일에 3가지 치환을 적용:
 
 - `{{project_name}}` ← `--name` (또는 `basename(dest)`)
 - `{{workspace_dir}}` ← `--workspace` (기본 `workspace`)
 - `{{kubeharness_version}}` ← `importlib.metadata.version("kubeharness")`
 
 치환 후 `.tmpl` suffix 를 떼어낸다. `.tmpl` 이 아닌 파일은 그대로 복사. 기존 파일은 `--force` 없으면 건너뛴다.
+
+**update** 는 이미 init 된 프로젝트에 하네스 쪽 문서 변경(스킬/에이전트/훅/명령 docs, `AGENTS.md`, `CLAUDE.md`)만 반영하는 용도. 허용 경로 목록은 `HARNESS_OWNED` 상수에 박혀있고, 그 밖의 경로(`config/**`, `context/**`, `{workspace_dir}/**`, `.claude/settings.json`)는 건드리지 않는다. `--force` 대신 항상 덮어쓰기가 기본이고, 대신 덮어쓸 대상이 제한적이라 안전. `{{project_name}}` 은 `AGENTS.md` 첫 줄에서, `{{workspace_dir}}` 는 `config/harness.yaml` 의 `conventions.workspace_dir` 에서 자동 감지하며 `--name` / `--workspace` 로 오버라이드 가능. `--dry-run` 은 덮어쓸 파일 목록을 찍고 종료.
 
 **Jinja2 · 템플릿 엔진 의도적으로 미도입** — 위 3개 변수가 전체 surface area.
 
@@ -204,7 +208,7 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
 
 타이밍이 다른 치환 2패스:
 
-- **Init 시점(`{{var}}`)**. `python -m harness init` 을 소비자가 실행할 때 `harness/init.py` 가 **한 번** 풀어낸다. 결과는 소비자 레포에 정적으로 박힌다. 이 패턴을 쓰는 파일은 `.tmpl` 로 끝나야 하며 치환 후 suffix 가 제거된다. 스캐폴드 이후 바뀌지 않는 **프로젝트 정체성** 값(`{{project_name}}`, `{{workspace_dir}}`) 용.
+- **Init 시점(`{{var}}`)**. `python -m harness init` 을 소비자가 실행할 때 `harness/init.py` 가 **한 번** 풀어낸다. 결과는 소비자 레포에 정적으로 박힌다. 이 패턴을 쓰는 파일은 `.tmpl` 로 끝나야 하며 치환 후 suffix 가 제거된다. 스캐폴드 이후 바뀌지 않는 **프로젝트 정체성** 값(`{{project_name}}`, `{{workspace_dir}}`) 용. `python -m harness update` 는 `HARNESS_OWNED` 하위의 `.tmpl` 파일에 한해 같은 치환을 **재적용** 한다 — 하네스 쪽 문서가 업그레이드될 때 사용.
 
 - **런타임(`{service}`, `{active_env}`, `{workspace}`, …)**. `harness/config.py` 의 `resolve()` 안에서 **매 호출마다** 풀린다. 이 토큰들은 `config/harness.yaml` 에 리터럴 문자열로 박혀 있다. YAML 값을 바꾸면 다음 CLI 호출부터 바로 반영 — 스캐폴드를 다시 돌릴 필요 없다.
 

@@ -70,6 +70,8 @@ label must be present on the pods.
 - `values-<env>.yaml` — env-specific knobs **only**:
   - `image.tag` if the env has a different release
   - `nodeSelector` from `environments.<env>.node_selectors`
+    (see `cluster-env-inject` for resolution order — prefer the
+    sub_goal's explicit `**node_category**` over inference)
   - domain-dependent settings using `environments.<env>.domain_suffix`
   - replica counts if different per env
 

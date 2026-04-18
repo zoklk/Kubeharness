@@ -66,3 +66,20 @@ metadata:
 - 릴리스 이름: `conventions.release_name` 이 계산합니다 — 절대
   하드코딩 금지.
 - 이미지: `<registry>/<service>:<image_tag>` — CLI 가 조립합니다.
+
+## 프로젝트 고유 규약
+
+TODO(init): 이 프로젝트만의 규약을 여기에 적으세요. 위 섹션들은
+kubeharness 가 강제하는 공통 규약이고, 아래는 덮어쓰거나 추가할
+자리입니다. 예:
+
+- 필수 추가 레이블 (예: `team=<name>`, `cost-center=<code>`)
+- helm values 레이아웃이 다르다면 (예: values 디렉터리 분리,
+  secrets 관리 플러그인)
+- 네트워킹/스토리지 관례 (ingress class 이름, PVC storageClass,
+  기본 NetworkPolicy)
+- 위 "네이밍" 규칙에서 예외를 두는 서비스군
+- 배포 시간대·점검창 (특정 요일/시간에 배포 금지)
+
+비우지 마세요 — 비어 있으면 에이전트가 kubeharness 기본 전제만
+갖고 움직여서 프로젝트 맥락과 어긋난 아티팩트를 만듭니다.

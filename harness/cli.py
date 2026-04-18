@@ -214,6 +214,22 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_update(args: argparse.Namespace) -> int:
+    from harness import init as init_mod
+    try:
+        init_mod.run_update(
+            dest=Path(args.dest).resolve(),
+            project_name=args.name,
+            workspace_dir=args.workspace,
+            dry_run=args.dry_run,
+        )
+    except init_mod.InitError as e:
+        json.dump({"error": "update", "message": str(e)}, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+        return 2
+    return 0
+
+
 # ─── argparse setup ──────────────────────────────────────────────────────────
 
 
@@ -236,6 +252,21 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--force", action="store_true",
                       help="Overwrite existing files")
     init.set_defaults(func=_cmd_init)
+
+    up = sub.add_parser(
+        "update",
+        help="Refresh harness-owned files (agents/skills/hooks/commands, "
+             "AGENTS.md, CLAUDE.md) without touching config/**, context/**, "
+             "or workspace/**.",
+    )
+    up.add_argument("--dest", default=".", help="Destination directory (default: .)")
+    up.add_argument("--name", default=None,
+                    help="Project name (default: auto-detect from AGENTS.md)")
+    up.add_argument("--workspace", default=None,
+                    help="Workspace directory name (default: auto-detect from config/harness.yaml)")
+    up.add_argument("--dry-run", dest="dry_run", action="store_true",
+                    help="Preview files that would be overwritten without writing")
+    up.set_defaults(func=_cmd_update)
 
     session_log_help = (
         "Append to this session log path instead of auto-generating one. "

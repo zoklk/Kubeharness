@@ -2,7 +2,19 @@
   "permissions": {
     "allow": [
       "Bash(python -m harness:*)",
-      "Read(**)"
+      "Read(**)",
+      "mcp__kagent__k8s_get_resources",
+      "mcp__kagent__k8s_get_resource_yaml",
+      "mcp__kagent__k8s_describe_resource",
+      "mcp__kagent__k8s_get_events",
+      "mcp__kagent__k8s_get_pod_logs",
+      "mcp__kagent__k8s_check_service_connectivity",
+      "mcp__kagent__k8s_get_available_api_resources",
+      "mcp__kagent__k8s_get_cluster_configuration",
+      "mcp__kagent__helm_get_release",
+      "mcp__kagent__helm_list_releases",
+      "mcp__kagent__cilium_status_and_version",
+      "mcp__kagent__cilium_show_dns_names"
     ],
     "deny": [
       "Write(harness/**)",
@@ -23,7 +35,8 @@
     ],
     "ask": [
       "Write({{workspace_dir}}/**)",
-      "Edit({{workspace_dir}}/**)"
+      "Edit({{workspace_dir}}/**)",
+      "mcp__kagent__k8s_execute_command"
     ]
   },
   "hooks": {
@@ -46,8 +59,7 @@
   },
   "mcpServers": {
     "kagent": {
-      "// TODO(init)": "Replace the URL with the kagent service DNS + port on your cluster.",
-      "url": "http://kagent-tools.kagent:8084/mcp",
+      "url": "TODO(init): replace with kagent service DNS + port, e.g. http://kagent-tools.kagent:<port>/mcp",
       "transport": "streamable_http",
       "allowedTools": [
         "k8s_get_resources",
@@ -59,7 +71,10 @@
         "k8s_get_available_api_resources",
         "k8s_get_cluster_configuration",
         "helm_get_release",
-        "helm_list_releases"
+        "helm_list_releases",
+        "k8s_execute_command",
+        "cilium_status_and_version",
+        "cilium_show_dns_names"
       ]
     }
   }

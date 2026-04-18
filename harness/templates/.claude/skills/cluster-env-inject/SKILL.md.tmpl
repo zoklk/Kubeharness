@@ -33,9 +33,15 @@ environments:
 
 Only values that differ by env:
 
-- `nodeSelector` — pick from `environments.<env>.node_selectors`
-  based on what the service is (a storage service uses the
-  `storage:` entry; a monitoring service uses `monitoring:`).
+- `nodeSelector` — pick from `environments.<env>.node_selectors`.
+  **Resolution order**:
+  1. If the sub_goal declares `**node_category**: <key>` in its
+     phase doc, use that key directly. This is the deterministic path.
+  2. Otherwise, infer from `technology` / service description
+     (a prometheus-like service → `monitoring`; a ceph/minio-like
+     service → `storage`). This is best-effort.
+  3. If the resolved key is not in `node_selectors`, emit a warning
+     and omit the nodeSelector block (do not guess a hostname).
 - `ingress.hosts` / `externalUrl` — suffix with
   `environments.<env>.domain_suffix`.
 - `replicaCount`, resource limits — if they differ between envs.

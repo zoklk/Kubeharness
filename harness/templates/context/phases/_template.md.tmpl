@@ -9,6 +9,7 @@
 **technology**: <name> (<version>)
 **dependency**: [<other-sub-goal>, …] 또는 [none]
 **artifacts**: helm, docker
+**node_category**: (<category>)
 
 해당 sub-goal 이 충족해야 할 기능 요구사항을 짧은 서술로 적습니다.
 간결하게 — 산문보다 bullet 이 낫습니다. 예:
@@ -57,3 +58,12 @@
 : `helm`, `docker` 중 하나 또는 둘. 어떤 author 스킬을 로드할지,
   어떤 CLI 단계를 돌릴지 결정합니다. **필수** — phase-spec-reader
   가 누락 시 경고합니다.
+
+`**node_category**`
+: 선택 필드. `config/harness.yaml` 의
+  `environments.<env>.node_selectors` 키 중 하나와 일치해야 합니다
+  (예: `storage`, `monitoring`). 값이 있으면 `cluster-env-inject`
+  스킬이 **결정적으로** 그 키의 호스트명을 `values-<env>.yaml` 의
+  `nodeSelector` 에 주입합니다. 생략하면 에이전트가 `technology`
+  와 서비스 설명으로 카테고리를 추론하거나, nodeSelector 자체를
+  생성하지 않습니다. 카테고리가 `harness.yaml` 에 없으면 경고.

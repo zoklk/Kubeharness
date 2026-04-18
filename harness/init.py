@@ -1,17 +1,21 @@
-"""``python -m harness init`` — scaffold templates/ into a consumer project.
+"""Template scaffold + refresh — powers ``harness init`` and ``harness update``.
 
-Copies the ``templates/`` tree (shipped with kubeharness) to ``--dest`` and
-performs simple ``{{var}}`` substitution on files with the ``.tmpl`` extension:
+**init**: copies the bundled ``templates/`` tree into ``--dest``, stripping the
+``.tmpl`` suffix and substituting:
 
 - ``{{project_name}}``      — ``--name`` or ``basename(dest)``
 - ``{{workspace_dir}}``     — ``--workspace`` (default ``workspace``)
 - ``{{kubeharness_version}}`` — installed package version
 
-After substitution the ``.tmpl`` extension is stripped. Non-template files are
-copied verbatim. Existing destination files are skipped unless ``--force``.
+Existing files are skipped unless ``--force``. ``init`` is stdlib-only so it
+runs cleanly on an empty directory (refactor.md §10.5).
 
-Only the stdlib is used so ``harness init`` works before the consumer has
-their YAML config in place (refactor.md §10.5).
+**update**: overwrites only harness-owned paths (agents/skills/hooks/commands,
+AGENTS.md, CLAUDE.md — see :data:`HARNESS_OWNED`) and leaves user territory
+(``config/``, ``context/``, ``{workspace_dir}/``, ``.claude/settings.json``)
+untouched. Auto-detects ``project_name`` from the first line of ``AGENTS.md``
+and ``workspace_dir`` from ``config/harness.yaml`` if PyYAML is available;
+both can be overridden with ``--name`` / ``--workspace``.
 """
 
 from __future__ import annotations
@@ -161,3 +165,124 @@ def _print_report(
     print(f"  2. Create {workspace_dir}/helm/<service>/ and {workspace_dir}/docker/<service>/")
     print("     for each service you plan to deploy.")
     print("  3. Review AGENTS.md and tailor the project-specific rules section.")
+
+
+# ─── update ────────────────────────────────────────────────────────────────
+#
+# Paths owned by kubeharness (shipped verbatim, safe to overwrite on update).
+# Everything else — config/**, context/**, {workspace_dir}/**, and the
+# settings.json itself — is user territory and left untouched.
+HARNESS_OWNED: tuple[str, ...] = (
+    ".claude/agents/",
+    ".claude/skills/",
+    ".claude/hooks/",
+    ".claude/commands/",
+    "AGENTS.md",
+    "CLAUDE.md",
+)
+
+
+def _is_harness_owned(rel: Path) -> bool:
+    s = rel.as_posix()
+    for entry in HARNESS_OWNED:
+        if entry.endswith("/"):
+            if s.startswith(entry):
+                return True
+        else:
+            if s == entry or s == entry + TEMPLATE_SUFFIX:
+                return True
+    return False
+
+
+def _detect_workspace_dir(dest: Path) -> str:
+    yaml_path = dest / "config" / "harness.yaml"
+    if not yaml_path.exists():
+        return "workspace"
+    try:
+        import yaml  # PyYAML is a runtime dep; only imported during update.
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+        ws = (data.get("conventions") or {}).get("workspace_dir")
+        if isinstance(ws, str) and ws:
+            return ws
+    except Exception:
+        pass
+    return "workspace"
+
+
+def _detect_project_name(dest: Path) -> str:
+    agents = dest / "AGENTS.md"
+    if agents.exists():
+        first = agents.read_text(encoding="utf-8").splitlines()[:1]
+        if first:
+            line = first[0].lstrip("# ").strip()
+            for suffix in (" — Agent Guide", " - Agent Guide"):
+                if line.endswith(suffix):
+                    return line[: -len(suffix)]
+            if line:
+                return line
+    return dest.name or "project"
+
+
+def run_update(
+    dest: Path,
+    project_name: str | None = None,
+    workspace_dir: str | None = None,
+    dry_run: bool = False,
+) -> _Report:
+    """Overwrite harness-owned files from the bundled templates.
+
+    Leaves user territory (``config/**``, ``context/**``,
+    ``{workspace_dir}/**``, ``.claude/settings.json``) untouched. Use this
+    to pull skill/agent/hook/doc updates into an already-initialized
+    project without losing local customizations.
+    """
+    dest = dest.resolve()
+    if not dest.is_dir():
+        raise InitError(f"destination does not exist: {dest}")
+
+    if project_name is None:
+        project_name = _detect_project_name(dest)
+    if workspace_dir is None:
+        workspace_dir = _detect_workspace_dir(dest)
+
+    subs = _substitutions(project_name, workspace_dir)
+    report = _Report()
+    templates = _templates_root()
+
+    for src in templates.rglob("*"):
+        if src.is_dir():
+            continue
+        rel = src.relative_to(templates)
+        if not _is_harness_owned(rel):
+            continue
+        dst = dest / rel
+        if dry_run:
+            preview = dst.with_suffix("") if dst.suffix == TEMPLATE_SUFFIX else dst
+            report.written.append(preview)
+            continue
+        _copy_one(src, dst, subs, force=True, report=report)
+
+    _print_update_report(dest, project_name, workspace_dir, report, dry_run)
+    return report
+
+
+def _print_update_report(
+    dest: Path,
+    project_name: str,
+    workspace_dir: str,
+    report: _Report,
+    dry_run: bool,
+) -> None:
+    verb = "Would update" if dry_run else "Updated"
+    count = len(report.written) + len(report.templated)
+    print(f"{verb} harness-owned files in: {project_name}")
+    print(f"  destination:   {dest}")
+    print(f"  workspace_dir: {workspace_dir}")
+    print(f"  files {'to overwrite' if dry_run else 'overwritten'}: {count}")
+    if dry_run:
+        print()
+        print("  (dry run — no files written)")
+        for p in report.written[:20]:
+            print(f"    {p.relative_to(dest)}")
+        if len(report.written) > 20:
+            print(f"    ... and {len(report.written) - 20} more")
