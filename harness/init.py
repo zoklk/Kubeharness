@@ -104,6 +104,16 @@ def _copy_one(
         report.written.append(dst)
 
 
+def _substituted_rel(rel: Path, subs: dict[str, str]) -> Path:
+    """Apply ``{{var}}`` substitution to each path component.
+
+    Lets template authors parameterize destination paths — e.g. a file at
+    ``templates/{{workspace_dir}}/tests/_template.sh.tmpl`` lands under the
+    user-chosen workspace dir at init time.
+    """
+    return Path(*(_apply_substitutions(part, subs) for part in rel.parts))
+
+
 def _walk_copy(
     root_src: Path,
     root_dst: Path,
@@ -115,7 +125,7 @@ def _walk_copy(
         if src.is_dir():
             continue
         rel = src.relative_to(root_src)
-        dst = root_dst / rel
+        dst = root_dst / _substituted_rel(rel, subs)
         _copy_one(src, dst, subs, force, report)
 
 
@@ -255,7 +265,7 @@ def run_update(
         rel = src.relative_to(templates)
         if not _is_harness_owned(rel):
             continue
-        dst = dest / rel
+        dst = dest / _substituted_rel(rel, subs)
         if dry_run:
             preview = dst.with_suffix("") if dst.suffix == TEMPLATE_SUFFIX else dst
             report.written.append(preview)
