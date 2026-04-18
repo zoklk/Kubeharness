@@ -65,7 +65,14 @@ metadata:
   그리고 phase 스펙의 `**service_name**:` 필드와 일치해야 합니다.
 - 릴리스 이름: `conventions.release_name` 이 계산합니다 — 절대
   하드코딩 금지.
-- 이미지: `<registry>/<service>:<image_tag>` — CLI 가 조립합니다.
+- 이미지 (자가 빌드): `<registry>/<service>:<image_tag>` — CLI 가
+  조립합니다. `{{workspace_dir}}/docker/<service>/Dockerfile` 이
+  존재할 때만 해당합니다.
+- 이미지 (업스트림 사용): `Dockerfile` 이 없으면 빌드/푸시 단계가
+  실행되지 않습니다. `values.yaml` 의 `image.repository` 는 업스트림
+  경로를 그대로 씁니다 (예: `emqx/emqx`, `bitnami/postgresql`).
+  `<registry>/<service>` 로 바꾸지 마세요 — 그 레지스트리에 해당
+  이미지가 올라가 있지 않습니다.
 
 ## 프로젝트 고유 규약
 

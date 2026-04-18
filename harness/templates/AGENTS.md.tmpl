@@ -66,14 +66,23 @@ Never call them from each other except in the documented direction
 
 1. Load `phase-spec-reader`, read the sub_goal section in
    `context/phases/<phase>.md`, note the `**artifacts**:` field.
-2. Load `helm-chart-author` / `docker-author` / `cluster-env-inject` as
-   the artifacts dictate.
-3. Write `{{workspace_dir}}/helm/<service>/` and/or
-   `{{workspace_dir}}/docker/<service>/`. Writes land immediately —
+2. Decide **upstream vs self-built**:
+   - **Upstream** (using a prebuilt image from Docker Hub / GHCR /
+     Quay without customization): no `docker/<service>/` directory,
+     no Dockerfile. `values.yaml` points `image.repository` at the
+     upstream path (e.g. `emqx/emqx`). Skip `docker-author`.
+   - **Self-built** (your own Dockerfile): create
+     `{{workspace_dir}}/docker/<service>/Dockerfile`. `values.yaml`
+     uses `image.repository: <registry>/<service>` with `<registry>`
+     from `conventions.registry`. Load `docker-author`.
+3. Load `helm-chart-author` / `cluster-env-inject` (and
+   `docker-author` only in the self-built branch).
+4. Write `{{workspace_dir}}/helm/<service>/` and — if self-built —
+   `{{workspace_dir}}/docker/<service>/`. Writes land immediately:
    `guard-path` blocks any path outside the workspace, and each
    Write/Edit is appended to the active session log by the
    `log-tool-call` hook.
-4. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
+5. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
 
 ### Iterate on an existing service
 

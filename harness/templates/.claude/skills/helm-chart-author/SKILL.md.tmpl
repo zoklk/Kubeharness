@@ -77,6 +77,28 @@ label must be present on the pods.
 
 Anything that never changes between envs belongs in `values.yaml`.
 
+## image.repository — upstream vs self-built
+
+Before writing `image.repository`, check whether
+`{{workspace_dir}}/docker/<service>/Dockerfile` exists.
+
+- **Self-built** (Dockerfile present): `image.repository` should be
+  `<registry>/<service>`, where `<registry>` comes from
+  `conventions.registry` in `config/harness.yaml`. The CLI builds
+  and pushes this image during `apply`.
+- **Upstream** (no Dockerfile): `image.repository` must be the
+  upstream path (e.g. `emqx/emqx`, `bitnami/postgresql`,
+  `prom/prometheus`). Do **not** rewrite it to
+  `<registry>/<service>` — the CLI does not push anything for
+  upstream services, so that path would not exist.
+
+`image.tag` follows the same split: self-built uses
+`conventions.image_tag`; upstream pins a specific upstream release
+(e.g. `"5.8.6"`). Never leave `image.tag: latest` for either case.
+
+If you are unsure which mode a service uses, check for the presence
+of `{{workspace_dir}}/docker/<service>/Dockerfile` before editing.
+
 ## Kubeconform / yamllint cleanliness
 
 - Keep `apiVersion`, `kind`, `metadata` at the top of every manifest.

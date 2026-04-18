@@ -7,6 +7,16 @@ description: Reference for writing or modifying Dockerfiles under {{workspace_di
 
 Read this before touching `{{workspace_dir}}/docker/<service>/Dockerfile`.
 
+## When this skill does NOT apply
+
+If the service pulls an upstream image (emqx, postgresql, redis,
+prometheus, …) and you are **not** customizing the image, do not
+create a Dockerfile. Leave `{{workspace_dir}}/docker/<service>/`
+missing entirely — the CLI's docker stage is gated on the presence
+of `Dockerfile` and will be skipped. The upstream image path goes
+into `values.yaml` (`image.repository: emqx/emqx` etc.), not into
+`<registry>/<service>`. See `helm-chart-author` for the values side.
+
 ## Required layout
 
 ```
