@@ -77,9 +77,28 @@ status = "error" if is_error else "ok"
 ts = time.strftime("%H:%M:%S")
 header = f"--- [TOOL/{tool}] {' | '.join([ts, status] + detail_parts)} ---\n"
 
+# For Task, also dump the subagent's response body so the main-session
+# audit trail captures diagnoser findings (otherwise only visible to
+# the orchestrator via the Task tool return value).
+body = ""
+if tool == "Task":
+    content = tool_response.get("content")
+    text = ""
+    if isinstance(content, str):
+        text = content
+    elif isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                text += block.get("text", "")
+    if text:
+        cap = 4000
+        if len(text) > cap:
+            text = text[:cap] + f"\n[truncated: {len(text) - cap} bytes]"
+        body = "<<< subagent response >>>\n" + text.rstrip("\n") + "\n<<< end >>>\n"
+
 log_path.parent.mkdir(parents=True, exist_ok=True)
 with log_path.open("a", encoding="utf-8") as f:
-    f.write(header)
+    f.write(header + body)
 PY
 
 exit 0

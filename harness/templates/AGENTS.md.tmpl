@@ -65,8 +65,14 @@ Never call them from each other except in the documented direction
 ### New sub_goal from scratch
 
 1. Load `phase-spec-reader`, read the sub_goal section in
-   `context/phases/<phase>.md`, note the `**artifacts**:` field.
-2. Decide **upstream vs self-built**:
+   `context/phases/<phase>.md`, note the `**artifacts**:`,
+   `**ports**:`, `**replicas**:`, and `**operational_notes**:` fields.
+2. **Load domain knowledge.** If the sub_goal's `**references**:`
+   is non-`[none]`, Read each listed `context/knowledge/*.md` file
+   **before** authoring anything. These describe clustering,
+   discovery, storage, or port constraints that cannot be inferred
+   from the upstream chart alone.
+3. Decide **upstream vs self-built**:
    - **Upstream** (using a prebuilt image from Docker Hub / GHCR /
      Quay without customization): no `docker/<service>/` directory,
      no Dockerfile. `values.yaml` points `image.repository` at the
@@ -75,14 +81,16 @@ Never call them from each other except in the documented direction
      `{{workspace_dir}}/docker/<service>/Dockerfile`. `values.yaml`
      uses `image.repository: <registry>/<service>` with `<registry>`
      from `conventions.registry`. Load `docker-author`.
-3. Load `helm-chart-author` / `cluster-env-inject` (and
+4. Load `helm-chart-author` / `cluster-env-inject` (and
    `docker-author` only in the self-built branch).
-4. Write `{{workspace_dir}}/helm/<service>/` and — if self-built —
-   `{{workspace_dir}}/docker/<service>/`. Writes land immediately:
-   `guard-path` blocks any path outside the workspace, and each
-   Write/Edit is appended to the active session log by the
-   `log-tool-call` hook.
-5. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
+5. Write `{{workspace_dir}}/helm/<service>/` and — if self-built —
+   `{{workspace_dir}}/docker/<service>/`, applying the constraints
+   from steps 1-2 (ports → Service/containerPorts, replicas →
+   replicaCount, operational_notes → chart values / kind choice).
+   Writes land immediately: `guard-path` blocks any path outside
+   the workspace, and each Write/Edit is appended to the active
+   session log by the `log-tool-call` hook.
+6. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
 
 ### Iterate on an existing service
 

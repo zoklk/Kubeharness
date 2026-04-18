@@ -1,0 +1,67 @@
+# <technology> — 운영 지식 메모
+
+이 파일은 LLM 이 `{{workspace_dir}}/helm/<service>/` 또는
+`{{workspace_dir}}/docker/<service>/` 아래 아티팩트를 작성하기 전에
+읽는 도메인 지식 저장소입니다. **phase-spec-reader** 가 sub_goal 의
+`**references**:` 필드에서 이 파일 경로를 발견하면 자동으로 Read 합니다.
+
+이 파일을 `<technology>.md` (예: `emqx.md`, `prometheus.md`) 로
+복사한 뒤 해당 기술의 **코드만 봐선 추론할 수 없는** 제약과
+지식을 채우세요. 복사하지 않은 원본 `_template.md` 는 참조 대상이
+아닙니다.
+
+---
+
+## 언제 읽어야 하는가
+
+<LLM 이 이 파일을 필요로 하는 상황 한두 줄. 예:>
+
+- `<technology>` 를 클러스터링 모드로 올릴 때
+- `values.yaml` 의 `persistence`, `service.type`, `podAntiAffinity`
+  섹션을 채울 때
+
+## 클러스터링 / 디스커버리
+
+<피어 검색 / 쿼럼 / 리더 선출 관련 제약. 예:>
+
+- `cluster.discovery_strategy: dns` + `dns.type: srv` 필수
+- headless Service (`clusterIP: None`) 가 있어야 SRV 레코드가 생성됨
+- pod 이름이 `<release>-<N>` 으로 안정적이어야 하므로 StatefulSet 사용
+- 홀수 노드 권장 (split-brain 방지)
+
+## 스토리지
+
+<PVC / storageClass / 볼륨 모드 관련 제약. 예:>
+
+- 데이터 디렉터리 `/opt/<tech>/data` 에 RWO PVC 필요
+- 환경별 storageClass 는 `environments.<env>` 에서 주입
+- 백업 정책: <있다면 명시>
+
+## 네트워킹 · 포트 · 프로토콜
+
+<특수 포트 / 프로토콜 / NetworkPolicy 요구사항. 예:>
+
+- 클라이언트: 1883 (MQTT), 8883 (MQTT/TLS)
+- 내부 클러스터: 4370 (ecp), 5369 (epmd) — pod 간 허용 필수
+- 외부 노출은 4번 포트 (HTTP dashboard) 만
+
+## 버전별 주의
+
+<특정 버전에서 알려진 이슈나 breaking change. 예:>
+
+- 5.8 이상: `mqtt.max_packet_size` 기본값 변경, 1MB 이상 시 명시 필요
+- 4.x → 5.x: config 포맷이 Erlang → HOCON 으로 변경
+
+## 보안 · 권한
+
+<RBAC / SecurityContext / secrets 관련. 예:>
+
+- 컨테이너 user: uid 1000 (root 금지)
+- `/etc/<tech>/password` 는 Secret 으로 마운트, values 에 평문 금지
+
+## 참고
+
+<공식 docs / 이슈 / 내부 러닝 링크. 예:>
+
+- https://www.emqx.io/docs/en/v5/deploy/cluster/dns.html
+- 이전 on-call 회고: <사내 문서 링크>

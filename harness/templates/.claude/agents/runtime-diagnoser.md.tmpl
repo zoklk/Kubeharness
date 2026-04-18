@@ -55,7 +55,14 @@ Optional:
 
 1. If `session_log` is set, `Read` the tail of that file to find the
    first failing check and its `log_tail`.
-2. Classify the failure into `failure_source`:
+2. **Load domain knowledge.** If the Task prompt carries a `phase` /
+   `sub_goal` (or `sub_goal_spec`), `Read context/phases/<phase>.md`,
+   find the sub_goal's `**references**:` field, and `Read` every
+   `context/knowledge/*.md` path it lists. Also check
+   `**operational_notes**:` — constraints there often point directly
+   at the failure root cause. See the `runtime-diagnosis` skill's
+   "Domain knowledge before web search" section for precedence rules.
+3. Classify the failure into `failure_source`:
    - `implementation` — chart values, Dockerfile, or image content
      wrong. Fixable with a file edit.
    - `smoke_test` — the deployment is healthy but the smoke test
@@ -63,13 +70,13 @@ Optional:
    - `environment` — cluster or dependency issue outside the service
      (missing namespace quota, broken DNS, missing secret). Not
      fixable inside the service's chart.
-3. Gather evidence via kagent:
+4. Gather evidence via kagent:
    - `k8s_get_events -n <namespace>` for recent warnings.
    - `k8s_describe_resource` on the deployment/statefulset.
    - `k8s_get_pod_logs` for any pod in a terminal state.
    - `k8s_check_service_connectivity` if a smoke test failed on a
      network call.
-4. If the root cause suggests a file edit (typically chart values or
+5. If the root cause suggests a file edit (typically chart values or
    Dockerfile), draft the minimal change. Use `Read` to load the
    existing file first; never invent content.
 

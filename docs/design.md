@@ -275,8 +275,12 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
 - **툴 콜 블록**(`log-tool-call.sh` PostToolUse 훅이 LLM 의 Write/Edit/Task/`mcp__kagent__*` 호출마다 append):
   ```
   --- [TOOL/Edit] 13:14:25 | ok | {workspace}/helm/emqx/values.yaml | lines_changed=3->5 ---
+  --- [TOOL/Task] 14:32:05 | ok | subagent=runtime-diagnoser | emqx cluster fail ---
+  <<< subagent response >>>
+  {"service":"emqx","failed_stage":"verify-runtime","root_cause":"..."}
+  <<< end >>>
   ```
-  훅은 `.harness/current-session-log` 포인터로 활성 로그를 찾는다. LLM 은 이 줄을 읽지 않는다 — 훅이 Claude Code 런타임에서 실행돼 토큰 비용 0.
+  Task 호출은 예외적으로 subagent 응답 본문을 함께 덤프한다 (4000자 cap). diagnoser 결과가 orchestrator Task 반환값으로만 흐르고 세션 로그에 남지 않는 갭을 막기 위함. 훅은 `.harness/current-session-log` 포인터로 활성 로그를 찾는다. LLM 은 이 줄을 읽지 않는다 — 훅이 Claude Code 런타임에서 실행돼 토큰 비용 0.
 - **이벤트 라인**(`shell.write_session_event`): 불투명한 문자열을 그대로 기록. CLI 와 orchestrator subagent 가 사용 (`[orchestrator] applied N file(s)` 등).
 - **보관**: `logging.retention_days` 가 스키마에 선언돼 있지만 정리 로직은 아직 미구현(추후).
 

@@ -10,6 +10,10 @@
 **dependency**: [<other-sub-goal>, …] 또는 [none]
 **artifacts**: helm, docker
 **node_category**: (<category>)
+**ports**: [<port>/<proto>, …] 또는 [none]
+**replicas**: <n> 또는 (<n>)
+**operational_notes**: (한 줄 bullet, 여러 개면 줄바꿈) 또는 [none]
+**references**: [<context/knowledge/*.md>, …] 또는 [none]
 
 해당 sub-goal 이 충족해야 할 기능 요구사항을 짧은 서술로 적습니다.
 간결하게 — 산문보다 bullet 이 낫습니다. 예:
@@ -67,3 +71,29 @@
   `nodeSelector` 에 주입합니다. 생략하면 에이전트가 `technology`
   와 서비스 설명으로 카테고리를 추론하거나, nodeSelector 자체를
   생성하지 않습니다. 카테고리가 `harness.yaml` 에 없으면 경고.
+
+`**ports**`
+: 이 서비스가 클러스터 내부 또는 외부에 노출해야 하는 포트 목록.
+  `<port>/<proto>` 형식 (`9090/tcp`, `53/udp`). helm-chart-author
+  가 Service/Deployment 의 containerPorts, servicePorts 에 반영
+  합니다. 네트워크 정책 / Ingress 결정에도 참고. 포트가 없으면
+  `[none]`.
+
+`**replicas**`
+: 필요 레플리카 수. 기본값 1이면 `(1)` 로 괄호 처리하거나 필드 자체
+  를 생략해도 됩니다. HA 가 필수인 서비스 (emqx 클러스터링 등) 는
+  명시하고 홀수를 권장.
+
+`**operational_notes**`
+: 코드만 봐선 추론 못 하는 도메인 제약. 예:
+  - `headless Service 필요 (clusterIP: None)`
+  - `cluster.discovery_strategy: dns + type: srv`
+  - `PVC storageClass 는 local-path 만 허용`
+  자세한 내용이 긴 경우엔 `context/knowledge/<tech>.md` 로 분리하고
+  여기선 한 줄 요약 + `**references**` 로 가리킵니다. 없으면 `[none]`.
+
+`**references**`
+: `context/knowledge/<...>.md` 파일 경로 목록. phase-spec-reader
+  가 sub_goal 을 해석할 때 이 파일들을 먼저 Read 하도록 지시합니다.
+  도메인 지식이 필요한 서비스 (클러스터링, 스토리지 CRD, 특수 포트
+  프로토콜) 에 사용. 없으면 `[none]`.

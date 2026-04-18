@@ -109,7 +109,9 @@ my-infra/
 ├── context/
 │   ├── conventions.md          # 프로젝트 아키텍처 · 네이밍 규약 (사용자 작성)
 │   ├── tech_stack.md           # 주 스택 · 런타임 · 버전 (사용자 작성)
-│   └── phases/_template.md     # 새 phase 문서의 뼈대 — 복사해 <phase>.md 로 사용
+│   ├── phases/_template.md     # 새 phase 문서의 뼈대 — 복사해 <phase>.md 로 사용
+│   └── knowledge/_template.md  # 도메인 지식 메모 뼈대 — 복사해 <tech>.md 로 사용
+│                               #   (클러스터링/포트/스토리지 등 코드로 추론 불가한 제약)
 └── .claude/                    # Claude Code 전용 wiring (다른 에이전트는 무시)
     ├── settings.json           # 권한(allow/deny/ask) + PreToolUse/PostToolUse 훅 + kagent MCP
     ├── commands/deploy.md      # /deploy <phase> <sub_goal> 슬래시 명령
@@ -130,7 +132,7 @@ my-infra/
 1. `cp config/harness.yaml.example config/harness.yaml` 후 `TODO(init)` 마크된 값 교체
    — `cluster.namespace`, `conventions.registry`, `conventions.image_tag`, `environments.*` 네 군데가 기본
 2. `context/conventions.md`, `context/tech_stack.md` 를 **본인 프로젝트 맥락으로 덮어 쓰기** — 템플릿 상태로 두면 에이전트가 엉뚱한 전제를 가져감
-3. `context/phases/_template.md` 를 복사해 `context/phases/<phase>.md` 작성. 각 sub_goal 의 `**artifacts**:` 목록이 에이전트가 만들 파일 종류를 결정
+3. `context/phases/_template.md` 를 복사해 `context/phases/<phase>.md` 작성. 각 sub_goal 의 `**artifacts**:` 목록이 에이전트가 만들 파일 종류를 결정. 코드만 봐선 추론 못 하는 도메인 제약 (클러스터링 디스커버리, 특수 포트, 스토리지 요구사항) 이 있으면 `context/knowledge/_template.md` 를 복사해 `<tech>.md` 로 채우고, sub_goal 의 `**references**:` 에 경로를 넣으세요 — phase-spec-reader 가 artifact 작성 전에 자동 로드합니다
 4. 에이전트 루프(4a) 또는 CLI 직접 호출(4b) 로 배포 실행
 5. (GitHub 연동 시) `git init` · `.gitignore` 에 `logs/`, `.harness/`, `.claude/settings.local.json` 추가 후 첫 커밋. `.claude/` 본체는 팀 공용이니 커밋 대상 (`.harness/` 는 `session-path` 가 쓰는 런타임 포인터 디렉터리라 gitignore)
 

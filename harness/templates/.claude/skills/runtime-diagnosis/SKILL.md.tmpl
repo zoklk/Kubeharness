@@ -59,14 +59,28 @@ Return exactly one of:
   dependency down. Report with `suggestions`; do not propose edits
   inside the service chart.
 
-## Upstream docs via WebSearch
+## Domain knowledge before web search
 
 When logs reference a technology-specific error
-(e.g. *"Prometheus TSDB corruption at block 01GXYZ"*), first check
-the project's own `context/knowledge/<tech>.md` if it exists
-(`Read`). If the project has no doc for it, `WebSearch` upstream —
-prefer official docs (prometheus.io, kubernetes.io, helm.sh).
-Cite the URL in your `observations`.
+(e.g. *"Prometheus TSDB corruption at block 01GXYZ"*), consult
+project-local domain knowledge **before** reaching for `WebSearch`:
+
+1. If the caller passed `sub_goal_spec` (or a `phase`/`sub_goal`),
+   `Read context/phases/<phase>.md` and find the sub_goal's
+   `**references**:` field. Every path listed there is a
+   `context/knowledge/*.md` file written specifically for this
+   service's operational constraints — load them all.
+2. If no `**references**:` entry or the field is `[none]`, look for
+   a conventionally-named `context/knowledge/<tech>.md` (derive
+   `<tech>` from the sub_goal's `**technology**:` field) and `Read`
+   it if present.
+3. Only after both miss, `WebSearch` upstream docs
+   (prometheus.io, kubernetes.io, helm.sh). Cite the URL in your
+   `observations`.
+
+Project-local knowledge reflects the team's prior incidents and
+cluster-specific constraints; it is authoritative for this project
+in a way upstream docs cannot be.
 
 ## Proposing a file edit
 
