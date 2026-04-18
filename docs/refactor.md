@@ -78,7 +78,7 @@ Kubeharness/
 │       │   └── runtime-diagnoser.md
 │       ├── hooks/
 │       │   ├── guard-path.sh     # config/harness.yaml 의 workspace_dir 를 런타임에 읽음
-│       │   └── verify-on-write.sh
+│       │
 │       └── skills/
 │           ├── helm-chart-author/SKILL.md
 │           ├── docker-author/SKILL.md
@@ -742,10 +742,7 @@ description: <한 줄. 언제 이 skill 을 로드해야 하는지>
       {"matcher": "Write|Edit",
        "hooks": [{"type": "command", "command": "bash .claude/hooks/guard-path.sh"}]}
     ],
-    "PostToolUse": [
-      {"matcher": "Write|Edit",
-       "hooks": [{"type": "command", "command": "bash .claude/hooks/verify-on-write.sh"}]}
-    ]
+    "PostToolUse": []
   },
   "mcpServers": {
     "kagent": {
@@ -785,7 +782,7 @@ description: <한 줄. 언제 이 skill 을 로드해야 하는지>
 10. `templates/config/harness.yaml.example.tmpl`: §9 스키마 (TODO(init) 주석 포함).
 11. `templates/AGENTS.md.tmpl`, `CLAUDE.md.tmpl`: 프로젝트별 규칙 골격 + skill 인덱스 + "관찰 시 diagnoser 호출" 워크플로.
 12. `templates/.claude/settings.json.tmpl`: §16.
-13. `templates/.claude/hooks/{guard-path,verify-on-write}.sh`: config 기반 동작.
+13. `templates/.claude/hooks/guard-path.sh`: config 기반 동작.
 14. `templates/.claude/commands/deploy.md`: §14.
 15. `templates/.claude/agents/{deploy-orchestrator,runtime-diagnoser}.md`: §12 (세션 로그 관리 규칙 포함).
 16. `templates/.claude/skills/*/SKILL.md`: 기존 프롬프트 분해 이식.
@@ -864,7 +861,6 @@ description: <한 줄. 언제 이 skill 을 로드해야 하는지>
 - **apply 실패 시 diagnose 호출 여부** — 현재 설계는 runtime 실패에만 diagnose. docker build 실패 (Dockerfile 오류, base image 404 등) 도 diagnoser 가 도울 수 있지만, 메인 세션이 직접 수정하게 하는 현 정책 유지할지
 - **verify-runtime `--env <name>` CLI 오버라이드** — 현재는 `environments.active` 만 사용. ad-hoc 으로 prod 검증이 필요한 경우 대응 방법
 - **release_name 패턴 env-agnostic 의도** — 기존 `{service}-dev-v1` 은 prod 에도 `-dev-v1` 접미사. 의도한 동작인지, 아니면 `{service}-{active_env}-v1` 로 바꿀지
-- **verify-on-write.sh PostToolUse hook 의 비용** — 매 Write/Edit 마다 yamllint/hadolint 실행 시 편집 반복에서 느림. 비활성 기본 + opt-in 으로 할지, 항상 실행할지
 
 ## 21. 구현자 참조 노트 (문서 자기완결성 보조)
 
@@ -972,19 +968,14 @@ CRD-only chart skip:
 - `**artifacts**:` 값은 `helm`, `docker` 중 하나 이상 (쉼표 구분). 이 필드가 메인 세션에 "어떤 디렉토리를 스캐폴드할지" 를 알림
 - 이 파서는 skill 본문의 규칙 명세만 제공. 코드에는 파서 없음 (메인 LLM 이 판단).
 
-### 21.8 Hook 스크립트 계약 (guard-path.sh / verify-on-write.sh)
+### 21.8 Hook 스크립트 계약 (guard-path.sh)
 
 **guard-path.sh** (PreToolUse, matcher=Write|Edit):
 - stdin: Claude Code 가 넘기는 JSON `{tool_name, tool_input: {file_path, ...}}`
 - 로직: `file_path` 가 `config/harness.yaml` 의 `write_allowed_globs` 매칭되는지 확인. `write_denied_globs` 는 차단. workspace_dir 밖은 차단.
 - 차단 시 exit 2 + stderr 에 한 줄 이유 → Claude Code 가 블록하고 사유를 LLM 에 전달.
 
-**verify-on-write.sh** (PostToolUse, matcher=Write|Edit):
-- 방금 수정된 파일이 helm chart 경로면 `yamllint` 만 간단히 실행. 실패 시 exit 2 로 즉시 피드백 (full verify-static 은 `/deploy` 에서).
-- Docker 파일이면 `hadolint` 즉석 실행.
-- 이 hook 은 **빠른 피드백**만 — 무거운 체크는 `/deploy` 의 static.py 에서.
-
-두 스크립트 모두 `config/harness.yaml` 을 `yq` 또는 inline python 으로 파싱 — 리터럴 금지.
+`config/harness.yaml` 은 `yq` 또는 inline python 으로 파싱 — 리터럴 금지.
 
 ### 21.9 CLI exit code 분류
 

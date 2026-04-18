@@ -198,7 +198,7 @@ def pipe(
         except subprocess.TimeoutExpired:
             p1.kill()
             _, p1_stderr_b = p1.communicate()
-        exit_code = p2.returncode
+        exit_code = p2.returncode or p1.returncode
     except subprocess.TimeoutExpired:
         err_msg = f"Command timed out after {timeout}s"
     except FileNotFoundError as e:

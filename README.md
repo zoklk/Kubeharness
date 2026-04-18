@@ -123,7 +123,6 @@ my-infra/
     │                           #      runtime-diagnosis
     └── hooks/
         ├── guard-path.sh       # workspace 밖 Write/Edit 차단 (PreToolUse)
-        ├── verify-on-write.sh  # 편집 직후 yamllint · hadolint 즉시 피드백 (PostToolUse)
         └── log-tool-call.sh    # Write/Edit/Task/kagent 호출을 세션 로그에 기록 (PostToolUse)
 ```
 
