@@ -1,12 +1,14 @@
 """Kubeharness CLI — ``python -m harness <subcommand>``.
 
-Five subcommands (refactor.md §10.4):
+Seven subcommands (refactor.md §10.4):
 
 - ``init``            — scaffold templates/ into a consumer project
+- ``update``          — refresh harness-owned files in an already-init'd project
 - ``verify-static``   — pre-deploy checks (yamllint, helm lint, kubeconform, ...)
 - ``apply``           — docker build+push and/or helm upgrade
 - ``verify-runtime``  — kubectl wait + smoke test
 - ``session-path``    — print a canonical session-log path (no file IO)
+- ``session-event``   — append a free-form line to a session log
 
 All three verification subcommands emit a single JSON object on stdout
 (refactor.md §11.1) and exit with:

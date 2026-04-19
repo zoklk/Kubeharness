@@ -1,7 +1,7 @@
 # Phase: <phase-name>
 
 이 phase 가 무엇을 제공하고, 왜 하나의 일관된 작업 단위인지 한 단락으로
-요약. 이 파일을 `<phase-name>.md` 로 복사한 뒤 빈칸을 채우세요.
+요약. 이 파일을 `<phase-name>.md` 로 복사한 뒤 빈칸을 채울 것.
 
 ## Sub-goal: <sub-goal-name>
 
@@ -12,10 +12,10 @@
 **node_category**: (<category>)
 **references**: [<context/knowledge/*.md>, …] 또는 [none]
 
-해당 sub-goal 이 충족해야 할 기능·운영 요구사항을 bullet 으로 적습니다.
+해당 sub-goal 이 충족해야 할 기능·운영 요구사항을 bullet 으로 적음.
 산문 한 문단보다 bullet 이 읽기 편하고, 포트·리소스처럼 항목이 많은
-부분은 **하위 bullet 으로 그룹**을 지어 주세요 — 이 narrative 가
-helm-chart-author 가 참조하는 실제 스펙입니다. 예:
+부분은 **하위 bullet 으로 그룹**을 지을 것 — 이 narrative 가
+helm-chart-author 가 참조하는 실제 스펙임. 예:
 
 - Prometheus 2.51 단일 replica 배포 (HA 불필요, 데이터는 PVC 에 영속)
 - observability / my-project 네임스페이스만 스크레이프
@@ -52,37 +52,37 @@ helm-chart-author 가 참조하는 실제 스펙입니다. 예:
 
 `**service_name**`
 : URL-safe slug. `{{workspace_dir}}/helm/` 와 `{{workspace_dir}}/docker/`
-  아래의 폴더명과 일치해야 합니다. 하네스는 이 값과
-  `conventions.release_name` 을 조합해 릴리스 이름을 계산합니다.
+  아래의 폴더명과 일치해야 함. 하네스는 이 값과
+  `conventions.release_name` 을 조합해 릴리스 이름을 계산함.
 
 `**technology**`
-: 사용하는 upstream 프로젝트와 (해당될 경우) 버전. 버전은 선택이니
-  없으면 `(<version>)` 괄호째 생략합니다. runtime-diagnoser 가
-  올바른 upstream 문서를 고를 때 참고합니다.
+: 사용하는 upstream 프로젝트와 (해당될 경우) 버전. 버전은 선택이므로
+  없으면 `(<version>)` 괄호째 생략. runtime-diagnoser 가
+  올바른 upstream 문서를 고를 때 참고함.
 
 `**dependency**`
 : 먼저 배포돼야 하는 다른 sub-goal 목록. 독립이면 `[none]`. 에이전트는
-  의존성 순서대로 스캐폴드합니다.
+  의존성 순서대로 스캐폴드함.
 
 `**artifacts**`
 : `helm`, `docker` 중 하나 또는 둘. 어떤 author 스킬을 로드할지,
-  어떤 CLI 단계를 돌릴지 결정합니다. **필수** — phase-spec-reader
-  가 누락 시 경고합니다.
+  어떤 CLI 단계를 돌릴지 결정함. **필수** — phase-spec-reader
+  가 누락 시 경고함.
 
 `**node_category**`
 : 선택 필드. `config/harness.yaml` 의
-  `environments.<env>.node_selectors` 키 중 하나와 일치해야 합니다
+  `environments.<env>.node_selectors` 키 중 하나와 일치해야 함
   (예: `storage`, `monitoring`). 값이 있으면 `cluster-env-inject`
   스킬이 **결정적으로** 그 키의 호스트명을 `values-<env>.yaml` 의
-  `nodeSelector` 에 주입합니다. 생략하면 에이전트가 `technology`
+  `nodeSelector` 에 주입함. 생략하면 에이전트가 `technology`
   와 서비스 설명으로 카테고리를 추론하거나, nodeSelector 자체를
-  생성하지 않습니다. 카테고리가 `harness.yaml` 에 없으면 경고.
+  생성하지 않음. 카테고리가 `harness.yaml` 에 없으면 경고.
 
 `**references**`
 : `context/knowledge/<...>.md` 파일 경로 목록. phase-spec-reader
-  가 sub_goal 을 해석할 때 이 파일들을 먼저 Read 하도록 지시합니다.
+  가 sub_goal 을 해석할 때 이 파일들을 먼저 Read 하도록 지시함.
   도메인 지식이 필요한 서비스 (클러스터링, 스토리지 CRD, 특수 포트
   프로토콜) 에 사용. 없으면 `[none]`. 기술 일반의 운영 제약 (디스커버리
   방식, 필수 헤드리스 서비스 등) 은 여기서 가리키는 knowledge 파일에
   들어가고, 이 phase 에서 달성할 **프로젝트 고유 요구사항** (포트 역할,
-  리소스 크기, retention) 은 위 narrative bullet 에 둡니다.
+  리소스 크기, retention) 은 위 narrative bullet 에 둠.
