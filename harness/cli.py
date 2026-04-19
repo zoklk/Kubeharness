@@ -189,7 +189,7 @@ def _cmd_verify_runtime(args: argparse.Namespace) -> int:
         args,
         "verify-runtime",
         lambda cfg: runtime.verify_runtime(
-            args.service, cfg, phase=args.phase, sub_goal=args.sub_goal,
+            args.service, cfg, phase=args.phase,
         ),
     )
 
@@ -319,8 +319,6 @@ def _build_parser() -> argparse.ArgumentParser:
     vr = sub.add_parser("verify-runtime", help="Post-deploy verification (kubectl wait + smoke).")
     vr.add_argument("--service", required=True)
     vr.add_argument("--phase", default=None, help="Phase name (needed for smoke test path).")
-    vr.add_argument("--sub-goal", dest="sub_goal", default=None,
-                    help="Sub-goal name (needed for smoke test path).")
     vr.add_argument("--session-log", dest="session_log", default=None, help=session_log_help)
     vr.set_defaults(func=_cmd_verify_runtime)
 

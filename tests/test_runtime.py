@@ -206,7 +206,7 @@ def test_verify_runtime_progresses_through_grace_window(cfg, helm_chart, stub, m
     assert kw.status == "pass"
 
 
-def test_smoke_test_skipped_without_phase_subgoal(cfg, helm_chart, stub):
+def test_smoke_test_skipped_without_phase(cfg, helm_chart, stub):
     stub.set("verify-runtime/helm_template", stdout=_DEPLOY_YAML)
     stub.set("verify-runtime/kubectl_wait", exit_code=0)
     results = runtime.verify_runtime("svc", cfg)
@@ -221,7 +221,7 @@ def test_smoke_test_runs_when_script_exists(cfg, helm_chart, stub, tmp_path):
     smoke_path = tmp_path / "ws" / "tests" / "p1"
     smoke_path.mkdir(parents=True)
     (smoke_path / "smoke-test-svc.sh").write_text("#!/bin/bash\nexit 0\n")
-    results = runtime.verify_runtime("svc", cfg, phase="p1", sub_goal="svc")
+    results = runtime.verify_runtime("svc", cfg, phase="p1")
     smoke = next(r for r in results if r.name == "smoke_test")
     assert smoke.status == "pass"
     # verify env vars were assembled (cmd was bash <path>)

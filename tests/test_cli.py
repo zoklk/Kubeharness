@@ -50,12 +50,12 @@ def stubbed_apply(monkeypatch):
 
 @pytest.fixture
 def stubbed_verify_runtime(monkeypatch):
-    def _fake(service, cfg, *, phase=None, sub_goal=None):
+    def _fake(service, cfg, *, phase=None):
         return [
             CheckResult(name="kubectl_wait", status="pass"),
             CheckResult(
                 name="smoke_test", status="skip",
-                detail=f"phase={phase} sub_goal={sub_goal}",
+                detail=f"service={service} phase={phase}",
             ),
         ]
     monkeypatch.setattr(cli.runtime, "verify_runtime", _fake)
@@ -123,7 +123,7 @@ def test_apply_subcommand_wires_runtime_apply(
     assert payload["stage"] == "apply"
 
 
-def test_verify_runtime_passes_phase_and_sub_goal(
+def test_verify_runtime_passes_phase(
     cfg, config_path, stubbed_verify_runtime, monkeypatch, tmp_path,
 ):
     monkeypatch.chdir(tmp_path)
@@ -131,12 +131,12 @@ def test_verify_runtime_passes_phase_and_sub_goal(
     code, payload = _run(monkeypatch, [
         "--config", str(config_path),
         "verify-runtime", "--service", "svc",
-        "--phase", "p1", "--sub-goal", "svc",
+        "--phase", "p1",
     ])
     assert code == 0
     smoke = next(c for c in payload["checks"] if c["name"] == "smoke_test")
     assert "phase=p1" in smoke["detail"]
-    assert "sub_goal=svc" in smoke["detail"]
+    assert "service=svc" in smoke["detail"]
 
 
 def test_existing_session_log_env_is_honored(
@@ -196,7 +196,7 @@ def test_verify_runtime_all_skip_returns_zero(
     """
     monkeypatch.delenv("HARNESS_SESSION_LOG", raising=False)
 
-    def _fake(service, cfg, *, phase=None, sub_goal=None):
+    def _fake(service, cfg, *, phase=None):
         return [
             CheckResult(name="kubectl_wait", status="skip", detail="CRD-only chart"),
             CheckResult(name="smoke_test", status="skip", detail="no script"),

@@ -16,12 +16,12 @@ Public API (see refactor.md §9):
     cfg.checks.runtime.kubectl_wait.initial_wait_seconds
 
     rs = cfg.resolve("prometheus")
-    rs.release_name      # "prometheus-dev-v1"
+    rs.release_name      # "prometheus"
     rs.chart_path        # Path("workspace/helm/prometheus")
     rs.docker_path       # Path("workspace/docker/prometheus")
     rs.values_files()    # [Path("values.yaml"), Path("values-dev.yaml")]
 
-    cfg.smoke_test_path("prometheus", phase="observability", sub_goal="prometheus")
+    cfg.smoke_test_path("prometheus", phase="observability")
 """
 
 from __future__ import annotations
@@ -184,13 +184,12 @@ class Config:
             _active_env=self.active_env,
         )
 
-    def smoke_test_path(self, service: str, phase: str, sub_goal: str) -> Path:
+    def smoke_test_path(self, service: str, phase: str) -> Path:
         c = self.conventions
         return Path(c.smoke_test_path.format(
             workspace=c.workspace_dir,
             service=service,
             phase=phase,
-            sub_goal=sub_goal,
         ))
 
 
@@ -217,9 +216,9 @@ def _parse(raw: dict, source: Path) -> Config:
         docker_path=str(conv_raw.get("docker_path", "{workspace}/docker/{service}")),
         smoke_test_path=str(conv_raw.get(
             "smoke_test_path",
-            "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh",
+            "{workspace}/tests/{phase}/smoke-test-{service}.sh",
         )),
-        release_name=str(conv_raw.get("release_name", "{service}-{active_env}-v1")),
+        release_name=str(conv_raw.get("release_name", "{service}")),
         label_selector=str(conv_raw.get("label_selector", "app.kubernetes.io/name={service}")),
         values_files=tuple(conv_raw.get("values_files") or ["values.yaml", "values-{active_env}.yaml"]),
         write_allowed_globs=tuple(conv_raw.get("write_allowed_globs") or [

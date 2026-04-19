@@ -19,26 +19,27 @@ the `runtime-diagnoser` subagent via `Task`.
 Read from the Task prompt (two whitespace-separated tokens):
 
 - `phase` — required. The stem of a file at `context/phases/<phase>.md`.
-- `sub_goal` — required. Matches a `## Sub-goal: <sub_goal>` section
-  header inside that phase doc.
+- `service` — required. Matches a `## Service: <service>` section
+  header inside that phase doc. This is also the Helm release name
+  and chart/docker directory name.
 
 Read from `config/harness.yaml`:
 
 - `orchestration.max_runtime_retries` — your retry budget for
   `verify-runtime` failures (static/apply failures are **not** retried).
 
-## Resolve service (first step)
+## Validate service (first step)
 
-Before any CLI call, resolve the workload identity from the phase doc.
+Before any CLI call, confirm the service is declared in the phase doc.
 
 1. `Read context/phases/<phase>.md`.
-2. Locate the section `## Sub-goal: <sub_goal>`.
-3. Extract the `**service_name**: <slug>` field from that section.
-4. Set `SERVICE=<slug>`. This is what `--service` takes downstream.
+2. Locate the section `## Service: <service>`.
+3. If the section is missing → **stop** and report
+   `"phase doc missing: context/phases/<phase>.md → Service: <service>"`.
 
-If any of (file, section, field) is missing → **stop** and report
-`"phase doc missing: context/phases/<phase>.md → sub_goal <sub_goal> → service_name"`.
-Phase docs are the contract; there is no fallback.
+No separate "resolve" step — the token passed in **is** the service
+name. Phase docs still own the spec (requirements narrative, artifacts,
+references), but the identifier is not re-derived.
 
 ## Session bootstrap
 
@@ -75,7 +76,7 @@ append to the same file.
    - `passed=false` → **stop**. Same reporting rule. Infra errors
      (missing registry auth, quota) are not auto-fixable.
 3. `python -m harness verify-runtime --service $SERVICE \
-      --phase $PHASE --sub-goal $SUB_GOAL --session-log "$SESSION_LOG"`
+      --phase $PHASE --session-log "$SESSION_LOG"`
    - `passed=true` → return success.
    - `passed=false` → go to **step-diagnose**.
 
@@ -90,7 +91,6 @@ Task(
   prompt="""
 service: $SERVICE
 phase: $PHASE
-sub_goal: $SUB_GOAL
 failed_stage: verify-runtime
 session_log: $HARNESS_SESSION_LOG
 verify_runtime_response: |
@@ -133,7 +133,6 @@ Return one JSON object to the caller:
 ```json
 {
   "phase": "...",
-  "sub_goal": "...",
   "service": "...",
   "passed": true,
   "retries": 0,
@@ -158,5 +157,5 @@ failure.
 - Do not skip the diagnoser on runtime failure. Even when the cause
   seems obvious, the diagnoser enforces the read-only cluster-query
   discipline.
-- Do not accept a `service` arg directly. Resolve it from the phase
-  doc so `context/phases/*.md` stays the single source of truth.
+- Do not re-derive the service name from the phase doc. The token
+  passed in is authoritative; the phase doc just owns the spec.

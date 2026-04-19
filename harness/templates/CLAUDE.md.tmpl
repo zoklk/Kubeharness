@@ -28,17 +28,17 @@ should honor.
 | Task | Tool |
 |---|---|
 | Running a harness subcommand | `Bash(python -m harness <...>)` |
-| Full deploy cycle | `/deploy <phase> <sub_goal>` (slash command) |
+| Full deploy cycle | `/deploy <phase> <service>` (slash command) |
 | Diagnosing a cluster issue | `Task(subagent_type="runtime-diagnoser", …)` |
 | Reading a phase spec | `Read(context/phases/<phase>.md)` after loading `phase-spec-reader` skill |
 
 ## Slash commands
 
-- **`/deploy <phase> <sub_goal>`** — run the full verify-apply-verify
-  pipeline via `deploy-orchestrator`. The orchestrator resolves
-  `service_name` from `context/phases/<phase>.md`. Everything else
-  (static-only, diagnose-only, scaffold) is a direct call from the main
-  session as described in `AGENTS.md`.
+- **`/deploy <phase> <service>`** — run the full verify-apply-verify
+  pipeline via `deploy-orchestrator`. The orchestrator validates that
+  `context/phases/<phase>.md` contains `## Service: <service>`.
+  Everything else (static-only, diagnose-only, scaffold) is a direct
+  call from the main session as described in `AGENTS.md`.
 
 ## Things not to do
 

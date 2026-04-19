@@ -3,16 +3,15 @@
 이 phase 가 무엇을 제공하고, 왜 하나의 일관된 작업 단위인지 한 단락으로
 요약. 이 파일을 `<phase-name>.md` 로 복사한 뒤 빈칸을 채울 것.
 
-## Sub-goal: <sub-goal-name>
+## Service: <service-name>
 
-**service_name**: <slug>
 **technology**: <name> (<version>)
-**dependency**: [<other-sub-goal>, …] 또는 [none]
+**dependency**: [<other-service>, …] 또는 [none]
 **artifacts**: helm, docker
 **node_category**: (<category>)
 **references**: [<context/knowledge/*.md>, …] 또는 [none]
 
-해당 sub-goal 이 충족해야 할 기능·운영 요구사항을 bullet 으로 적음.
+해당 service 가 충족해야 할 기능·운영 요구사항을 bullet 으로 적음.
 산문 한 문단보다 bullet 이 읽기 편하고, 포트·리소스처럼 항목이 많은
 부분은 **하위 bullet 으로 그룹**을 지을 것 — 이 narrative 가
 helm-chart-author 가 참조하는 실제 스펙임. 예:
@@ -28,11 +27,10 @@ helm-chart-author 가 참조하는 실제 스펙임. 예:
   - CPU: `100m` / `500m`
   - Memory: `256Mi` / `1Gi`
 
-## Sub-goal: <next-sub-goal-name>
+## Service: <next-service-name>
 
-**service_name**: ...
 **technology**: ...
-**dependency**: [<previous-sub-goal>]
+**dependency**: [<previous-service>]
 **artifacts**: helm
 **references**: [none]
 
@@ -50,10 +48,12 @@ helm-chart-author 가 참조하는 실제 스펙임. 예:
 
 ## 필드 레퍼런스
 
-`**service_name**`
-: URL-safe slug. `{{workspace_dir}}/helm/` 와 `{{workspace_dir}}/docker/`
-  아래의 폴더명과 일치해야 함. 하네스는 이 값과
-  `conventions.release_name` 을 조합해 릴리스 이름을 계산함.
+**헤딩 규칙**
+: `## Service: <name>` 의 `<name>` 이 곧 service 이름이자 Helm
+  릴리스 이름. URL-safe slug (`[a-z0-9-]+`) 이어야 하며,
+  `{{workspace_dir}}/helm/<name>/` · `{{workspace_dir}}/docker/<name>/`
+  폴더명과 일치해야 함. 하네스는 이 값을 `conventions.release_name`
+  패턴에 그대로 넣음 (기본 패턴: `{service}`).
 
 `**technology**`
 : 사용하는 upstream 프로젝트와 (해당될 경우) 버전. 버전은 선택이므로
@@ -61,7 +61,7 @@ helm-chart-author 가 참조하는 실제 스펙임. 예:
   올바른 upstream 문서를 고를 때 참고함.
 
 `**dependency**`
-: 먼저 배포돼야 하는 다른 sub-goal 목록. 독립이면 `[none]`. 에이전트는
+: 먼저 배포돼야 하는 다른 service 목록. 독립이면 `[none]`. 에이전트는
   의존성 순서대로 스캐폴드함.
 
 `**artifacts**`
@@ -80,7 +80,7 @@ helm-chart-author 가 참조하는 실제 스펙임. 예:
 
 `**references**`
 : `context/knowledge/<...>.md` 파일 경로 목록. phase-spec-reader
-  가 sub_goal 을 해석할 때 이 파일들을 먼저 Read 하도록 지시함.
+  가 service 를 해석할 때 이 파일들을 먼저 Read 하도록 지시함.
   도메인 지식이 필요한 서비스 (클러스터링, 스토리지 CRD, 특수 포트
   프로토콜) 에 사용. 없으면 `[none]`. 기술 일반의 운영 제약 (디스커버리
   방식, 필수 헤드리스 서비스 등) 은 여기서 가리키는 knowledge 파일에

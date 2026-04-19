@@ -42,7 +42,7 @@ description: Short, factual description
 ## Release naming
 
 The orchestrator resolves release names via
-`conventions.release_name` — default `"{service}-{active_env}-v1"`.
+`conventions.release_name` — default `"{service}"`.
 Never hardcode the release name in templates. Use
 `{{ .Release.Name }}` in Go templates and trust the CLI to pass the
 correct release name to `helm upgrade`.
@@ -71,7 +71,7 @@ label must be present on the pods.
   - `image.tag` if the env has a different release
   - `nodeSelector` from `environments.<env>.node_selectors`
     (see `cluster-env-inject` for resolution order — prefer the
-    sub_goal's explicit `**node_category**` over inference)
+    service's explicit `**node_category**` over inference)
   - domain-dependent settings using `environments.<env>.domain_suffix`
   - replica counts if different per env
 

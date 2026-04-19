@@ -17,7 +17,7 @@ def test_loads_minimal(cfg):
 
 def test_resolve_substitutes_service_and_env(cfg):
     rs = cfg.resolve("prometheus")
-    assert rs.release_name == "prometheus-dev-v1"
+    assert rs.release_name == "prometheus"
     assert rs.label_selector == "app.kubernetes.io/name=prometheus"
     assert rs.chart_path == Path("ws/helm/prometheus")
     assert rs.docker_path == Path("ws/docker/prometheus")
@@ -43,7 +43,7 @@ def test_env_unknown_raises(cfg):
 
 
 def test_smoke_test_path(cfg):
-    p = cfg.smoke_test_path("prometheus", phase="observability", sub_goal="prometheus")
+    p = cfg.smoke_test_path("prometheus", phase="observability")
     assert p == Path("ws/tests/observability/smoke-test-prometheus.sh")
 
 
@@ -107,7 +107,7 @@ def test_defaults_fill_when_fields_missing(tmp_path: Path):
     load_config.cache_clear()
     c = load_config(minimal)
     # Defaults from refactor.md §9 kick in
-    assert c.conventions.release_name == "{service}-{active_env}-v1"
+    assert c.conventions.release_name == "{service}"
     assert c.conventions.image_tag == "dev"
     assert c.checks.runtime.kubectl_wait.initial_wait_seconds == 60
     assert c.checks.runtime.kubectl_wait.terminal_grace_seconds == 240

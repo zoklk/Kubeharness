@@ -1,18 +1,18 @@
 ---
-description: Deploy a sub-goal end-to-end via the deploy-orchestrator subagent
-argument-hint: <phase> <sub_goal>
+description: Deploy a service end-to-end via the deploy-orchestrator subagent
+argument-hint: <phase> <service>
 ---
 
 # /deploy {{project_name}}
 
-Run verify-static → apply → verify-runtime for a sub-goal declared in
-`context/phases/<phase>.md`. The orchestrator reads the phase doc to
-resolve `service_name`, sets up the session log, and drives the pipeline
-with a retry budget from `config/harness.yaml`.
+Run verify-static → apply → verify-runtime for a service declared in
+`context/phases/<phase>.md`. The orchestrator validates the service
+exists in the phase doc, sets up the session log, and drives the
+pipeline with a retry budget from `config/harness.yaml`.
 
 Owned by `deploy-orchestrator`:
 
-- phase doc resolution (→ `service_name`)
+- phase doc validation (`## Service: <service>` section must exist)
 - session log setup (`logs/deploy/<ts>-<service>.log`)
 - `python -m harness verify-static / apply / verify-runtime` in order
 - failure dispatch to `runtime-diagnoser` (read-only) on `verify-runtime` fail
@@ -22,7 +22,7 @@ Owned by `deploy-orchestrator`:
 ## Usage
 
 ```
-/deploy <phase> <sub_goal>
+/deploy <phase> <service>
 ```
 
 Example:
@@ -32,13 +32,13 @@ Example:
 ```
 
 This expects `context/phases/observability.md` to have a section
-`## Sub-goal: prometheus` with a `**service_name**: <slug>` field.
+`## Service: prometheus`. The service name in the heading is the
+Helm release name and chart directory name — there is no separate
+`service_name` field to resolve.
 
 ## What this does
 
-Invoke the `deploy-orchestrator` subagent with both args. **Do not**
-pass `service` explicitly — the orchestrator must read it from the
-phase doc so the doc remains the source of truth.
+Invoke the `deploy-orchestrator` subagent with both args.
 
 ```
 Task(
@@ -54,7 +54,7 @@ Task(
   session. No orchestrator or phase doc needed.
 - **Just want to observe a service?** Call
   `Task(subagent_type="runtime-diagnoser", prompt="...")` directly.
-- **Scaffolding a brand-new sub-goal?** Use skills
+- **Scaffolding a brand-new service?** Use skills
   (`phase-spec-reader`, `helm-chart-author`, `docker-author`) from the
   main session to write the phase doc + artifacts, *then* run
   `/deploy`.
@@ -66,7 +66,6 @@ The orchestrator returns a single JSON envelope:
 ```json
 {
   "phase": "observability",
-  "sub_goal": "prometheus",
   "service": "prometheus",
   "passed": true,
   "retries": 0,
