@@ -92,7 +92,7 @@ Task(
 service: $SERVICE
 phase: $PHASE
 failed_stage: verify-runtime
-session_log: $HARNESS_SESSION_LOG
+session_log: $SESSION_LOG
 verify_runtime_response: |
   <paste the CLI JSON verbatim>
 """,
