@@ -1,198 +1,158 @@
-"""
-harness/verifiers/static.py 단위 테스트
-실제 CLI 툴을 사용하여 올바른 status 반환 여부 검증
+"""Tests for harness/static.py — detection gating + check execution.
+
+External CLIs (yamllint, helm, kubeconform, ...) are replaced with a stub that
+records calls and returns canned RunResults. This keeps the suite hermetic and
+fast while still exercising the registry + detection + disabled-skip logic.
 """
 
-import os
-import textwrap
-import pytest
+from __future__ import annotations
+
 from pathlib import Path
-from harness.verifiers import static
 
-# PATH에 ~/.local/bin 추가 (CI 환경 대비)
-os.environ["PATH"] = str(Path.home() / ".local/bin") + ":" + os.environ.get("PATH", "")
+import pytest
+
+from harness import shell, static
+from harness.static import CheckResult
 
 
-# ── 픽스처: 임시 YAML 파일 ────────────────────────────────────────────────────
+class _ShellStub:
+    """Drop-in replacement for ``shell.run`` / ``shell.pipe``."""
 
-@pytest.fixture
-def valid_k8s_yaml(tmp_path):
-    f = tmp_path / "deployment.yaml"
-    f.write_text(textwrap.dedent("""\
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: test-app
-          namespace: gikview
-        spec:
-          replicas: 1
-          selector:
-            matchLabels:
-              app: test-app
-          template:
-            metadata:
-              labels:
-                app: test-app
-            spec:
-              containers:
-              - name: test-app
-                image: nginx:latest
-                ports:
-                - containerPort: 80
-    """))
-    return str(f)
+    def __init__(self):
+        self.calls: list[list[str]] = []
+        self.defaults: dict[str, shell.RunResult] = {}
+
+    def set(self, label: str, result: shell.RunResult) -> None:
+        self.defaults[label] = result
+
+    def _result(self, label: str | None) -> shell.RunResult:
+        return self.defaults.get(
+            label or "",
+            shell.RunResult(command=[], exit_code=0, stdout="", stderr=""),
+        )
+
+    def run(self, cmd, *, label=None, **_):
+        self.calls.append(list(cmd))
+        return self._result(label)
+
+    def pipe(self, cmd1, cmd2, *, label=None, **_):
+        self.calls.append(list(cmd1) + ["|"] + list(cmd2))
+        return self._result(label)
 
 
 @pytest.fixture
-def invalid_yaml(tmp_path):
-    f = tmp_path / "bad.yaml"
-    f.write_text("key: [\n  unclosed bracket\n")
-    return str(f)
+def stub(monkeypatch):
+    s = _ShellStub()
+    monkeypatch.setattr(static.shell, "run", s.run)
+    monkeypatch.setattr(static.shell, "pipe", s.pipe)
+    return s
 
 
 @pytest.fixture
-def secret_yaml(tmp_path):
-    f = tmp_path / "secret.yaml"
-    f.write_text(textwrap.dedent("""\
-        apiVersion: v1
-        kind: Secret
-        metadata:
-          name: test-secret
-        data:
-          password: c3VwZXJzZWNyZXQ=
-        stringData:
-          api_key: "AKIAIOSFODNN7EXAMPLE"
-    """))
-    return str(f)
+def helm_chart(tmp_path: Path, monkeypatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    chart = tmp_path / "ws" / "helm" / "svc"
+    chart.mkdir(parents=True)
+    (chart / "Chart.yaml").write_text("name: svc\nversion: 0.1.0\n")
+    (chart / "values.yaml").write_text("replicaCount: 1\n")
+    (chart / "values-dev.yaml").write_text("replicaCount: 1\n")
+    (chart / "templates").mkdir()
+    (chart / "templates" / "deploy.yaml").write_text("# go template")
+    return chart
 
 
 @pytest.fixture
-def minimal_helm_chart(tmp_path):
-    chart_dir = tmp_path / "mychart"
-    chart_dir.mkdir()
-    (chart_dir / "Chart.yaml").write_text(textwrap.dedent("""\
-        apiVersion: v2
-        name: mychart
-        version: 0.1.0
-    """))
-    templates = chart_dir / "templates"
-    templates.mkdir()
-    (templates / "deployment.yaml").write_text(textwrap.dedent("""\
-        apiVersion: apps/v1
-        kind: Deployment
-        metadata:
-          name: {{ .Release.Name }}
-          namespace: {{ .Release.Namespace }}
-        spec:
-          replicas: {{ .Values.replicas | default 1 }}
-          selector:
-            matchLabels:
-              app.kubernetes.io/name: {{ .Release.Name }}
-          template:
-            metadata:
-              labels:
-                app.kubernetes.io/name: {{ .Release.Name }}
-            spec:
-              containers:
-              - name: app
-                image: nginx:latest
-    """))
-    (chart_dir / "values.yaml").write_text("replicas: 1\n")
-    return str(chart_dir)
+def docker_dir(tmp_path: Path, monkeypatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / "ws" / "docker" / "svc"
+    d.mkdir(parents=True)
+    (d / "Dockerfile").write_text("FROM alpine\n")
+    return d
 
 
-# ── yamllint ─────────────────────────────────────────────────────────────────
-
-def test_yamllint_pass(valid_k8s_yaml):
-    r = static.check_yamllint(valid_k8s_yaml)
-    assert r["name"] == "yamllint"
-    assert r["status"] in ("pass", "skip")
-    print(f"\n[yamllint pass] {r}")
+# ─── detection ───────────────────────────────────────────────────────────────
 
 
-def test_yamllint_fail(invalid_yaml):
-    r = static.check_yamllint(invalid_yaml)
-    assert r["status"] in ("fail", "skip")
-    print(f"\n[yamllint fail] {r}")
+def test_no_artifacts_fails_with_detection(cfg, tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    results = static.run_static("nope", cfg)
+    assert len(results) == 1
+    assert results[0].name == "artifact_detection"
+    assert results[0].status == "fail"
 
 
-# ── kubeconform ───────────────────────────────────────────────────────────────
-
-def test_kubeconform_pass(valid_k8s_yaml):
-    r = static.check_kubeconform(valid_k8s_yaml)
-    assert r["name"] == "kubeconform"
-    assert r["status"] in ("pass", "skip")
-    print(f"\n[kubeconform pass] {r['status']}: {r['detail'][:80]}")
-
-
-# ── helm lint ─────────────────────────────────────────────────────────────────
-
-def test_helm_lint_pass(minimal_helm_chart):
-    r = static.check_helm_lint(minimal_helm_chart)
-    assert r["name"] == "helm_lint"
-    assert r["status"] in ("pass", "skip")
-    print(f"\n[helm_lint] {r['status']}: {r['detail'][:80]}")
+def test_helm_only_triggers_helm_checks(cfg, helm_chart, stub):
+    results = static.run_static("svc", cfg)
+    names = [r.name for r in results]
+    assert "yamllint" in names
+    assert "helm_lint" in names
+    assert "kubeconform" in names
+    assert "hadolint" not in names  # no Dockerfile
 
 
-# ── helm template | kubeconform ───────────────────────────────────────────────
+def test_docker_only_triggers_docker_checks(cfg, docker_dir, stub):
+    results = static.run_static("svc", cfg)
+    names = [r.name for r in results]
+    assert "hadolint" in names
+    assert "gitleaks_docker" in names
+    assert "helm_lint" not in names
 
-def test_helm_template_kubeconform(minimal_helm_chart):
-    r = static.check_helm_template_kubeconform(
-        chart_path=minimal_helm_chart,
-        release_name="test-release",
-        namespace="gikview",
-        values_files=[str(Path(minimal_helm_chart) / "values.yaml")],
+
+def test_disabled_check_reports_skip(cfg, helm_chart, stub):
+    # trivy_config is disabled in the fixture YAML
+    results = static.run_static("svc", cfg)
+    trivy = next(r for r in results if r.name == "trivy_config")
+    assert trivy.status == "skip"
+    assert "disabled" in (trivy.detail or "")
+
+
+# ─── result mapping ─────────────────────────────────────────────────────────
+
+
+def test_failure_produces_detail_and_log_tail(cfg, helm_chart, stub):
+    stub.set(
+        "static/helm_lint",
+        shell.RunResult(
+            command=["helm", "lint"],
+            exit_code=1,
+            stdout="",
+            stderr="Error: values-dev.yaml:3 invalid",
+        ),
     )
-    assert r["name"] == "helm_template_kubeconform"
-    assert r["status"] in ("pass", "fail", "skip")
-    print(f"\n[helm_template_kubeconform] {r['status']}: {r['detail'][:80]}")
+    results = static.run_static("svc", cfg)
+    helm_lint = next(r for r in results if r.name == "helm_lint")
+    assert helm_lint.status == "fail"
+    assert "invalid" in (helm_lint.detail or "")
+    assert "values-dev.yaml:3" in (helm_lint.log_tail or "")
 
 
-# ── trivy ─────────────────────────────────────────────────────────────────────
-
-def test_trivy_config_pass(valid_k8s_yaml):
-    r = static.check_trivy_config(valid_k8s_yaml)
-    assert r["name"] == "trivy_config"
-    assert r["status"] in ("pass", "fail", "skip")
-    print(f"\n[trivy] {r['status']}: {r['detail'][:80]}")
-
-
-# ── gitleaks ──────────────────────────────────────────────────────────────────
-
-def test_gitleaks_pass(valid_k8s_yaml, tmp_path):
-    r = static.check_gitleaks(str(tmp_path))
-    assert r["name"] == "gitleaks"
-    assert r["status"] in ("pass", "skip")
-    print(f"\n[gitleaks pass] {r['status']}")
+def test_missing_cli_is_skipped(cfg, helm_chart, stub):
+    stub.set(
+        "static/kubeconform",
+        shell.RunResult(
+            command=[], exit_code=-1,
+            stdout="", stderr="command not found: kubeconform",
+        ),
+    )
+    results = static.run_static("svc", cfg)
+    kcf = next(r for r in results if r.name == "kubeconform")
+    assert kcf.status == "skip"
 
 
-def test_gitleaks_fail(secret_yaml, tmp_path):
-    # secret_yaml을 tmp_path에 위치시키고 스캔
-    r = static.check_gitleaks(str(tmp_path))
-    assert r["status"] in ("fail", "pass", "skip")
-    print(f"\n[gitleaks secret] {r['status']}: {r['detail'][:80]}")
+def test_yamllint_excludes_templates_dir(cfg, helm_chart, stub):
+    static.run_static("svc", cfg)
+    # find the yamllint call
+    yamllint_calls = [c for c in stub.calls if c and c[0] == "yamllint"]
+    assert yamllint_calls, "yamllint not invoked"
+    files = yamllint_calls[0]
+    for f in files:
+        assert "templates/" not in f
 
 
-# ── path prefix ───────────────────────────────────────────────────────────────
-
-def test_path_prefix_pass():
-    files = ["edge-server/helm/prometheus/Chart.yaml", "edge-server/manifests/svc.yaml"]
-    r = static.check_path_prefix(files)
-    assert r["status"] == "pass"
-
-
-def test_path_prefix_fail():
-    files = ["edge-server/helm/ok.yaml", "harness/state.py"]
-    r = static.check_path_prefix(files)
-    assert r["status"] == "fail"
-    assert "harness/state.py" in r["detail"]
-
-
-# ── log_dir 동작 확인 ─────────────────────────────────────────────────────────
-
-def test_log_saved(valid_k8s_yaml, tmp_path):
-    log_dir = str(tmp_path / "logs")
-    r = static.check_yamllint(valid_k8s_yaml, log_dir=log_dir)
-    if r["status"] != "skip":
-        assert r["log_path"] is not None
-        assert Path(r["log_path"]).exists()
+def test_values_files_are_passed_to_helm_lint(cfg, helm_chart, stub):
+    static.run_static("svc", cfg)
+    helm_lint_calls = [c for c in stub.calls if c and c[:2] == ["helm", "lint"]]
+    assert helm_lint_calls
+    joined = " ".join(helm_lint_calls[0])
+    assert "values.yaml" in joined
+    assert "values-dev.yaml" in joined

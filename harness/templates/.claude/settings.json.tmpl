@@ -1,0 +1,81 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m harness:*)",
+      "Read(**)",
+      "Write({{workspace_dir}}/**)",
+      "Edit({{workspace_dir}}/**)",
+      "mcp__kagent__k8s_get_resources",
+      "mcp__kagent__k8s_get_resource_yaml",
+      "mcp__kagent__k8s_describe_resource",
+      "mcp__kagent__k8s_get_events",
+      "mcp__kagent__k8s_get_pod_logs",
+      "mcp__kagent__k8s_check_service_connectivity",
+      "mcp__kagent__k8s_get_available_api_resources",
+      "mcp__kagent__k8s_get_cluster_configuration",
+      "mcp__kagent__helm_get_release",
+      "mcp__kagent__helm_list_releases",
+      "mcp__kagent__cilium_status_and_version",
+      "mcp__kagent__cilium_show_dns_names"
+    ],
+    "deny": [
+      "Write(harness/**)",
+      "Write(.claude/**)",
+      "Write(context/**)",
+      "Write(config/**)",
+      "Write(docs/**)",
+      "Write({{workspace_dir}}/tests/**)",
+      "Edit(harness/**)",
+      "Edit(.claude/**)",
+      "Edit(context/**)",
+      "Edit(config/**)",
+      "Edit(docs/**)",
+      "Edit({{workspace_dir}}/tests/**)",
+      "Bash(kubectl:*)",
+      "Bash(helm:*)",
+      "Bash(docker:*)"
+    ],
+    "ask": [
+      "mcp__kagent__k8s_execute_command"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {"type": "command", "command": "bash .claude/hooks/guard-path.sh"}
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|Task|mcp__kagent__.*",
+        "hooks": [
+          {"type": "command", "command": "bash .claude/hooks/log-tool-call.sh"}
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "kagent": {
+      "url": "TODO(init): replace with kagent service DNS + port, e.g. http://kagent-tools.kagent:<port>/mcp",
+      "transport": "streamable_http",
+      "allowedTools": [
+        "k8s_get_resources",
+        "k8s_get_resource_yaml",
+        "k8s_describe_resource",
+        "k8s_get_events",
+        "k8s_get_pod_logs",
+        "k8s_check_service_connectivity",
+        "k8s_get_available_api_resources",
+        "k8s_get_cluster_configuration",
+        "helm_get_release",
+        "helm_list_releases",
+        "k8s_execute_command",
+        "cilium_status_and_version",
+        "cilium_show_dns_names"
+      ]
+    }
+  }
+}
