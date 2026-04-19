@@ -13,11 +13,11 @@ Kubeharness 가 노리는 한 가지는 **개발 + 배포의 결정적 워크플
 방법론은 쿠버네티스의 선언적 관리에서 빌려 옴. K8s 가 desired state 를 선언하면 컨트롤러가 현재 상태를 거기에 수렴시키듯, Kubeharness 는 **사용 기술 + 목표 상태** 두 축을 입력으로 받음:
 
 - **사용 기술** — `context/knowledge/<tech>.md` 에 기술별 운영 제약(클러스터링, 스토리지, 포트/프로토콜, 알려진 함정)을 고정함. upstream 문서에서 추론이 불가능한 도메인 지식의 저장소.
-- **목표 상태** — `context/phases/<phase>.md` 의 각 sub_goal 이 "이 배포가 충족해야 할 기능·운영 요구사항"을 bullet 으로 선언함. 포트 역할, replica 수, retention, 리소스 크기 등.
+- **목표 상태** — `context/phases/<phase>.md` 의 각 service 가 "이 배포가 충족해야 할 기능·운영 요구사항"을 bullet 으로 선언함. 포트 역할, replica 수, retention, 리소스 크기 등.
 
 에이전트는 이 두 입력을 읽어 Helm chart · Dockerfile · values 파일을 **결정적으로 생성** 하고, harness CLI 는 생성 결과가 선언된 목표 상태를 실제로 만족하는지 `verify-static` · `apply` · `verify-runtime` 세 단계로 **결정적으로 검증** 함. 코드 작성부터 클러스터 도달까지의 경로가 한 흐름으로 묶임.
 
-목표 상태가 "충족됐다"는 판정의 최종 수단은 **smoke-test** 임. Pod Ready · 리소스 할당 같은 인프라 레벨 조건은 `verify-runtime` 의 kubectl wait 이 걸러 내지만, "이 기술이 이 프로젝트에서 원하는 대로 동작하는가" — 예: MQTT 브로커가 실제로 publish/subscribe 를 처리하는가, DB 가 기대한 스키마로 쿼리를 받는가 — 는 클러스터 상태만 봐서는 알 수 없음. 그래서 각 sub_goal 마다 `workspace/tests/<phase>/smoke-test-<service>.sh` 를 두고, narrative bullet 에 선언된 기능 요구사항을 검사하는 명시적 스크립트로 번역함. 스크립트의 exit code 가 목표 상태 수렴 여부를 결정함 — 선언적 스펙과 실제 동작을 연결하는 결정적 피드백 루프.
+목표 상태가 "충족됐다"는 판정의 최종 수단은 **smoke-test** 임. Pod Ready · 리소스 할당 같은 인프라 레벨 조건은 `verify-runtime` 의 kubectl wait 이 걸러 내지만, "이 기술이 이 프로젝트에서 원하는 대로 동작하는가" — 예: MQTT 브로커가 실제로 publish/subscribe 를 처리하는가, DB 가 기대한 스키마로 쿼리를 받는가 — 는 클러스터 상태만 봐서는 알 수 없음. 그래서 각 service 마다 `workspace/tests/<phase>/smoke-test-<service>.sh` 를 두고, narrative bullet 에 선언된 기능 요구사항을 검사하는 명시적 스크립트로 번역함. 스크립트의 exit code 가 목표 상태 수렴 여부를 결정함 — 선언적 스펙과 실제 동작을 연결하는 결정적 피드백 루프.
 
 아래 §1 "설계 목표" 는 이 철학을 실현하기 위해 구현 레벨에서 지키는 규칙들임.
 
@@ -56,17 +56,17 @@ harness/
 
 ```python
 cfg = load_config()                             # @lru_cache
-cfg.resolve("prometheus").release_name          # "prometheus-dev-v1"
+cfg.resolve("prometheus").release_name          # "prometheus"
 cfg.resolve("prometheus").chart_path            # Path("workspace/helm/prometheus")
 cfg.resolve("prometheus").values_files()        # [Path("values.yaml"), Path("values-dev.yaml")]
 cfg.env("dev").domain_suffix                    # environments.dev 에서
 cfg.active_environment()                        # 축약 — env(cfg.active_env)
-cfg.smoke_test_path("svc", "p1", "svc")         # Path("workspace/tests/p1/smoke-test-svc.sh")
+cfg.smoke_test_path("svc", "p1")                # Path("workspace/tests/p1/smoke-test-svc.sh")
 cfg.checks.static.is_enabled("yamllint")        # bool
 cfg.checks.runtime.kubectl_wait.initial_wait_seconds  # int
 ```
 
-여기서 풀리는 치환 토큰: `{service}`, `{active_env}`, `{workspace}`, `{phase}`, `{sub_goal}`.
+여기서 풀리는 치환 토큰: `{service}`, `{active_env}`, `{workspace}`, `{phase}`.
 
 기본값(refactor.md §9): YAML 이 `release_name`, `image_tag`, `kubectl_wait.initial_wait_seconds` 등을 생략하면 기본값이 채워짐. `config.py` 의 `_parse` 참조.
 
@@ -120,7 +120,7 @@ DOCKER_CHECKS = {hadolint, gitleaks_docker}
 
 `helm upgrade` 에 **`--wait` 없음**. 파드 readiness 는 더 풍부한 신호를 볼 수 있는 `verify_runtime` 책임.
 
-**`verify_runtime(service, cfg, *, phase, sub_goal)`** — 배포 후:
+**`verify_runtime(service, cfg, *, phase)`** — 배포 후:
 
 1. **CRD-only chart 감지.** `helm template` 을 돌려 렌더된 YAML 을 파싱. `kind` 가 `{Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, Pod}` 중 하나도 없으면 CRD-only chart 로 간주해 `kubectl_wait` 를 skip. template 실패 시엔 "workload 있음"으로 보수적으로 처리 — 레거시 동작 보존.
 
@@ -131,10 +131,10 @@ DOCKER_CHECKS = {hadolint, gitleaks_docker}
 
    기본값: 1차 60s, grace 240s (프로젝트별로 `checks.runtime.kubectl_wait.*` 에서 조정).
 
-3. **Smoke test.** `cfg.smoke_test_path(service, phase, sub_goal)` 이 존재하면 `bash <path>` 로 실행하며 다음 env 주입:
+3. **Smoke test.** `cfg.smoke_test_path(service, phase)` 이 존재하면 `bash <path>` 로 실행하며 다음 env 주입:
    - `SERVICE`, `NAMESPACE`, `RELEASE_NAME`, `ACTIVE_ENV`, `DOMAIN_SUFFIX`
 
-   `phase` 또는 `sub_goal` 이 누락되면 (CLI 플래그를 안 넘긴 경우) skip — 어느 smoke test 가 서비스에 맞는지 CLI 가 추측할 수 없음.
+   `phase` 가 누락되면 (CLI 플래그를 안 넘긴 경우) skip — 어느 smoke test 가 서비스에 맞는지 CLI 가 추측할 수 없음.
 
 ### `cli.py`
 
@@ -200,7 +200,7 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
   ├─►  python -m harness apply --service <svc>          ──►  stdout JSON
   │         └── docker build+push, helm uninstall+upgrade
   │
-  ├─►  python -m harness verify-runtime --service <svc> --phase P --sub-goal G
+  ├─►  python -m harness verify-runtime --service <svc> --phase P
   │         └── helm template 파싱, kubectl_wait_staged, smoke_test
   │
   │  runtime fail 시:

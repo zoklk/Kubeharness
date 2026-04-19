@@ -15,7 +15,7 @@
 
 ## 2. 핵심 원칙
 
-1. **하드코딩 최소화** — namespace, release naming, chart path, 워크스페이스 루트 디렉토리명, 체크 목록, 타임아웃 등 **모든 프로젝트별 값은 `config/harness.yaml` 한 곳에만** 정의. Python 코드, hook, slash command, skill 모두 이 설정을 읽음. 코드·템플릿에 `"gikview"`, `"edge-server"`, `"{service}-dev-v1"` 같은 리터럴이 나타나면 안 됨. 템플릿 파일의 워크스페이스 경로는 `{{workspace_dir}}` (init 치환) 또는 `{workspace}` (런타임 치환) 플레이스홀더로 둠.
+1. **하드코딩 최소화** — namespace, release naming, chart path, 워크스페이스 루트 디렉토리명, 체크 목록, 타임아웃 등 **모든 프로젝트별 값은 `config/harness.yaml` 한 곳에만** 정의. Python 코드, hook, slash command, skill 모두 이 설정을 읽음. 코드·템플릿에 `"gikview"`, `"edge-server"`, `"prometheus-dev"` 같은 리터럴이 나타나면 안 됨. 템플릿 파일의 워크스페이스 경로는 `{{workspace_dir}}` (init 치환) 또는 `{workspace}` (런타임 치환) 플레이스홀더로 둠.
 2. **파이프라인 단계 기준 분류** — 파일을 tool 타입(kubectl/helm/shell)이 아닌 **언제 실행되는가**로 묶음. 배포 전 정적 검사는 `static.py`, 배포 실행 + 배포 후 검증은 `runtime.py`. 유지보수자가 "배포 후 새 체크 추가" 같은 요구를 받았을 때 **열어볼 파일이 즉시 결정**되도록.
 3. **도구 중립성** — Python·config·`AGENTS.md`·hook 스크립트는 어떤 에이전트 CLI 에서도 동작해야 함. Claude Code 전용 기능에 의존 금지. `.claude/` 는 wiring 일 뿐 핵심 아님.
 4. **최소주의** — 빈 파일·추상 레이어·선행 최적화 금지. `__init__.py` 제외 빈 스캐폴딩 만들지 않음. 필요해지는 순간에 추가.
@@ -119,11 +119,11 @@ Kubeharness/
 │   ├── tech_stack.md
 │   ├── knowledge/                # 기술별 참조 지식 (선택)
 │   └── phases/
-│       └── <phase>.md            # sub_goal 선언 (요구사항 명세)
+│       └── <phase>.md            # service 선언 (요구사항 명세)
 ├── <workspace_dir>/              # 기본명 "workspace". harness init --workspace <name> 로 변경 가능.
 │   ├── helm/<service>/           # write_allowed_globs 기본 스코프
 │   ├── docker/<service>/
-│   └── tests/<phase>/smoke-test-<sub_goal>.sh
+│   └── tests/<phase>/smoke-test-<service>.sh
 └── logs/
     └── deploy/
         └── <YYYYMMDD-HHMMSS>-<service>.log    # 세션 로그 (한 /deploy = 한 파일)
@@ -186,9 +186,9 @@ refactor 원칙 (가능하면 기존 기능 포함) 에 따라 아래 기능은 
 | Docker build + push (registry) | `harness/runtime.py` |
 | `kubectl wait` 2단계 (60s 대기 → terminal 감지 → 실패면 조기 종료, 아니면 240s 추가. CRD-only chart 자동 skip) | `harness/runtime.py` |
 | `values.yaml + values-{active}.yaml` 자동 선택 | `harness/config.py` |
-| Smoke test 실행 (`<workspace_dir>/tests/<phase>/smoke-test-<sub_goal>.sh`) | `harness/runtime.py` |
-| Phase 문서 fuzzy heading 매칭 + sub_goal spec 추출 | `templates/.claude/skills/phase-spec-reader/SKILL.md` |
-| sub_goal spec 의 `**service_name**:`, `**technology**:`, `**dependency**:` 파싱 | `phase-spec-reader` skill. **`**artifacts**:` 필드 신규 추가** |
+| Smoke test 실행 (`<workspace_dir>/tests/<phase>/smoke-test-<service>.sh`) | `harness/runtime.py` |
+| Phase 문서 fuzzy heading 매칭 + service spec 추출 | `templates/.claude/skills/phase-spec-reader/SKILL.md` |
+| service spec 의 `**technology**:`, `**dependency**:`, `**artifacts**:` 파싱 (헤딩 `## Service: <name>` 이 곧 service 이름) | `phase-spec-reader` skill |
 | env 별 `domain_suffix`, `arch`, `nodeSelector` 주입 | `cluster-env-inject` skill + `config/harness.yaml` 의 `environments` 섹션 |
 | `failure_source = "smoke_test"` 시 자동 재시도 중단 (사람 개입 요구) | `runtime-diagnoser` 응답 스키마 + `deploy-orchestrator` 정책 |
 | `max_runtime_retries` 초과 시 사이클 탈출 | `deploy-orchestrator` 시스템 프롬프트 + `config/harness.yaml` 의 `orchestration.max_runtime_retries` |
@@ -235,10 +235,10 @@ conventions:
   # artifact 경로 (파일 존재 시에만 단계 실행 — 감지 기반)
   chart_path: "{workspace}/helm/{service}"
   docker_path: "{workspace}/docker/{service}"
-  smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh"
+  smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{service}.sh"
 
   # 이름·레이블
-  release_name: "{service}-{active_env}-v1"
+  release_name: "{service}"
   label_selector: "app.kubernetes.io/name={service}"
 
   # values 파일 (순서대로 -f 로 넘겨짐)
@@ -304,7 +304,7 @@ orchestration:
 cfg = load_config()                              # ./config/harness.yaml 을 CWD 기준으로 로드
 cfg.cluster.namespace                            # 소비자 설정 값 (예: "myns")
 cfg.conventions.workspace_dir                    # "workspace" (또는 프로젝트가 지정한 값)
-cfg.resolve("prometheus").release_name           # "prometheus-dev-v1" (release_name 패턴 적용)
+cfg.resolve("prometheus").release_name           # "prometheus" (release_name 패턴 적용)
 cfg.resolve("prometheus").chart_path             # Path("workspace/helm/prometheus") — {workspace} 치환됨
 cfg.resolve("prometheus").docker_path            # Path("workspace/docker/prometheus")
 cfg.resolve("prometheus").values_files()         # [Path("values.yaml"), Path("values-dev.yaml")]
@@ -315,7 +315,7 @@ cfg.checks.static.enabled_names                  # ["yamllint", "helm_lint", ...
 cfg.checks.runtime.kubectl_wait.initial_wait_seconds  # 60
 ```
 
-`{workspace}` 는 `cfg.conventions.workspace_dir` 로 치환 (다른 `{service}`, `{phase}`, `{sub_goal}`, `{active_env}` 는 호출 시점에 바인딩).
+`{workspace}` 는 `cfg.conventions.workspace_dir` 로 치환 (다른 `{service}`, `{phase}`, `{active_env}` 는 호출 시점에 바인딩).
 
 `load_config()` 는 프로세스 내부에서 `@lru_cache(maxsize=1)` 로 결과 캐시. 한 CLI 호출 내에 YAML 을 여러 번 파싱하지 않음. 테스트에서 config 파일을 교체해야 하면 `load_config.cache_clear()` 사용.
 
@@ -545,7 +545,7 @@ proposed_files:
     - mcp__kagent__helm_list_releases
   ```
   **Write/Edit/Bash 없음** (진단 전용). 도구 이름은 kagent 서버 버전에 따라 변할 수 있으므로 소비자가 `.claude/agents/runtime-diagnoser.md` 를 설치 클러스터에 맞게 갱신.
-- 입력: `deploy-orchestrator` 가 Task prompt 문자열에 직렬화해 넘김. 최소 필수 필드: `service`, `failed_stage`, `session_log`, 마지막 stage 의 CLI 응답 JSON (`checks` 배열 포함). 선택 필드: `sub_goal_spec` (phase-spec-reader 가 뽑은 요구사항)
+- 입력: `deploy-orchestrator` 가 Task prompt 문자열에 직렬화해 넘김. 최소 필수 필드: `service`, `failed_stage`, `session_log`, 마지막 stage 의 CLI 응답 JSON (`checks` 배열 포함). 선택 필드: `service_spec` (phase-spec-reader 가 뽑은 요구사항)
 - 시스템 프롬프트: `runtime-diagnosis` skill 본문 + 출력 스키마 명세
 - 출력 JSON:
   ```json
@@ -651,7 +651,7 @@ description: <한 줄. 언제 이 skill 을 로드해야 하는지>
 |---|---|---|
 | `helm-chart-author` | Helm chart 파일(Chart.yaml, values*, templates/\*)을 작성하거나 수정할 때 | 디렉토리 구조, Chart.yaml 필드, values/values-dev/values-prod 분리 규칙, 릴리스 이름 패턴, 레이블 컨벤션, `config/harness.yaml` 참조 방법 |
 | `docker-author` | Dockerfile 을 작성하거나 수정할 때 | 멀티스테이지 빌드 패턴, 보안 베이스 이미지 선택, hadolint 규칙 회피 요령, registry 푸시 준비 |
-| `phase-spec-reader` | `context/phases/<phase>.md` 에서 특정 sub_goal 사양을 추출할 때 | fuzzy heading 매칭 규칙, `**service_name**:`, `**technology**:`, `**dependency**:`, `**artifacts**:` 필드 의미, sub_goal 섹션 경계 결정 로직 |
+| `phase-spec-reader` | `context/phases/<phase>.md` 에서 특정 service 사양을 추출할 때 | `## Service: <name>` 헤딩 fuzzy 매칭, `**technology**:`, `**dependency**:`, `**artifacts**:` 필드 의미, service 섹션 경계 결정 로직 |
 | `cluster-env-inject` | `values-dev.yaml` / `values-prod.yaml` 에 env 별 값을 채울 때 | `config/harness.yaml` 의 `environments.dev/prod` 매트릭스 읽는 법, nodeSelector / domain_suffix / arch 주입 예시 |
 | `runtime-diagnosis` | 배포 실패 원인을 진단할 때 (주로 `runtime-diagnoser` subagent 가 참조) | kagent 도구 사용 패턴, 로그·이벤트·describe 조회 순서, `failure_source` 분류 기준, **WebSearch 로 공식 문서 조회 지침**, 소비자 `context/knowledge/<tech>.md` 우선 참조 규칙 |
 
@@ -671,14 +671,14 @@ description: <한 줄. 언제 이 skill 을 로드해야 하는지>
 **다른 작업**:
 - **정적 체크만 필요**: 메인 세션이 `!python -m harness verify-static --service X` 직접 호출
 - **관찰만 필요**: 사람이 자연어로 "prometheus 왜 이상해?" → 메인 세션이 `Task(runtime-diagnoser)` 호출 (AGENTS.md 에 명시)
-- **스캐폴드**: 사람이 자연어로 "phase X 의 Y sub_goal 구현해줘" → 메인 세션이 phase-spec-reader + helm-chart-author 등 skill 참조해서 작성
+- **스캐폴드**: 사람이 자연어로 "phase X 의 Y service 구현해줘" → 메인 세션이 phase-spec-reader + helm-chart-author 등 skill 참조해서 작성
 
 ## 15. 워크플로
 
-### 15.1 신규 sub_goal 구현 (scratch)
+### 15.1 신규 service 구현 (scratch)
 
 ```
-1. 사람: "phase observability 의 prometheus sub_goal 구현해줘"
+1. 사람: "phase observability 의 prometheus service 구현해줘"
 2. 메인 세션:
    - phase-spec-reader skill 로드 → observability.md 에서 prometheus 섹션 추출
    - **artifacts**: 확인 (예: "helm, docker")
@@ -860,7 +860,7 @@ description: <한 줄. 언제 이 skill 을 로드해야 하는지>
 - Kubeharness 자체 dogfooding 의 실용성 — 배포 대상 없이 verify-static 만 의미 있는가
 - **apply 실패 시 diagnose 호출 여부** — 현재 설계는 runtime 실패에만 diagnose. docker build 실패 (Dockerfile 오류, base image 404 등) 도 diagnoser 가 도울 수 있지만, 메인 세션이 직접 수정하게 하는 현 정책 유지할지
 - **verify-runtime `--env <name>` CLI 오버라이드** — 현재는 `environments.active` 만 사용. ad-hoc 으로 prod 검증이 필요한 경우 대응 방법
-- **release_name 패턴 env-agnostic 의도** — 기존 `{service}-dev-v1` 은 prod 에도 `-dev-v1` 접미사. 의도한 동작인지, 아니면 `{service}-{active_env}-v1` 로 바꿀지
+- **release_name 패턴 단순화 결정 (2026-04)** — `{service}-{active_env}-v1` → `{service}` 로 축소. dev/prod 가 다른 kubeconfig·네임스페이스로 격리돼 한 클러스터에서 충돌할 일이 없고, `-v1` 은 Helm revision 과 중복이라 제거. phase 스펙의 `## Service: <name>` 헤딩이 곧 릴리스 이름.
 
 ## 21. 구현자 참조 노트 (문서 자기완결성 보조)
 
@@ -920,7 +920,7 @@ CRD-only chart skip:
 
 ### 21.4 Smoke test 실행 규약
 
-- 경로: `<workspace_dir>/tests/<phase>/smoke-test-<sub_goal>.sh`
+- 경로: `<workspace_dir>/tests/<phase>/smoke-test-<service>.sh`
 - 실행: `bash <path>` — cwd 는 프로젝트 루트 (소비자 CWD)
 - 환경변수 주입:
   - `SERVICE`, `NAMESPACE`, `RELEASE_NAME`, `ACTIVE_ENV`, `DOMAIN_SUFFIX`
@@ -950,20 +950,20 @@ CRD-only chart skip:
 
 ### 21.7 Phase 문서 포맷 (phase-spec-reader skill 의 파서 입력)
 
-`context/phases/<phase>.md` 의 sub_goal 섹션 예시:
+`context/phases/<phase>.md` 의 service 섹션 예시:
 
 ```markdown
-## <service_name>
+## Service: prometheus
 
-**service_name**: prometheus
-**technology**: helm, docker
-**artifacts**: helm, docker            # 신규 필드
-**dependency**: none
+**technology**: kube-prometheus-stack v58
+**artifacts**: helm, docker
+**dependency**: [none]
 
 <요구사항 본문 — 사람이 자유 서술>
 ```
 
-- fuzzy heading 매칭: `##` 수준에서 서비스 이름 포함 heading 검색 (대소문자·공백 무시)
+- 헤딩 규칙: `## Service: <name>` 의 `<name>` 이 곧 service 이름 (Helm 릴리스, 차트 디렉터리, label 값). 별도 `**service_name**:` 필드 없음.
+- fuzzy heading 매칭: `## Service:` 접두사 뒤의 이름을 대소문자·`_`/`-`/공백 동등으로 비교
 - 섹션 경계: 다음 `##` heading 또는 EOF
 - `**artifacts**:` 값은 `helm`, `docker` 중 하나 이상 (쉼표 구분). 이 필드가 메인 세션에 "어떤 디렉토리를 스캐폴드할지" 를 알림
 - 이 파서는 skill 본문의 규칙 명세만 제공. 코드에는 파서 없음 (메인 LLM 이 판단).

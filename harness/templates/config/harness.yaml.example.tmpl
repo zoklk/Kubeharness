@@ -18,10 +18,11 @@ conventions:
   # 아티팩트 경로. 해당 아티팩트가 존재할 때만 단계가 실행됨 (detection-gated).
   chart_path: "{workspace}/helm/{service}"
   docker_path: "{workspace}/docker/{service}"
-  smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh"
+  smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{service}.sh"
 
-  # 릴리스 이름: env 가 포함돼 dev/prod 릴리스가 충돌하지 않음.
-  release_name: "{service}-{active_env}-v1"
+  # 릴리스 이름: env 는 클러스터 경계(kubeconfig)와 values 파일로 분리되므로
+  # 릴리스 이름에 env 를 인코딩하지 않음.
+  release_name: "{service}"
   label_selector: "app.kubernetes.io/name={service}"
 
   # -f 로 이 순서대로 넘기는 values 파일. {active_env} 는 resolve() 시점 바인딩.

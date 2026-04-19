@@ -35,7 +35,7 @@ Only values that differ by env:
 
 - `nodeSelector` — pick from `environments.<env>.node_selectors`.
   **Resolution order**:
-  1. If the sub_goal declares `**node_category**: <key>` in its
+  1. If the service declares `**node_category**: <key>` in its
      phase doc, use that key directly. This is the deterministic path.
   2. Otherwise, infer from `technology` / service description
      (a prometheus-like service → `monitoring`; a ceph/minio-like

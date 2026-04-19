@@ -48,7 +48,7 @@ At minimum:
 
 Optional:
 
-- `sub_goal_spec` — extracted requirements from `context/phases/*.md`.
+- `service_spec` — extracted requirements from `context/phases/*.md`.
   Consult the `phase-spec-reader` skill format if provided.
 
 ## Workflow
@@ -56,9 +56,9 @@ Optional:
 1. If `session_log` is set, `Read` the tail of that file to find the
    first failing check and its `log_tail`.
 2. **Load domain knowledge.** If the Task prompt carries a `phase` /
-   `sub_goal` (or `sub_goal_spec`), `Read context/phases/<phase>.md`,
-   find the sub_goal's `**references**:` field, and `Read` every
-   `context/knowledge/*.md` path it lists. Scan the sub_goal's
+   `service` (or `service_spec`), `Read context/phases/<phase>.md`,
+   find the service's `**references**:` field, and `Read` every
+   `context/knowledge/*.md` path it lists. Scan the service's
    narrative bullets too — port roles, retention, resource sizing
    often name the exact constraint that's being violated. See the
    `runtime-diagnosis` skill's "Domain knowledge before web search"

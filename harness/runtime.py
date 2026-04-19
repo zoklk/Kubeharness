@@ -3,7 +3,7 @@
 Two public entry points, both detection-gated on ``chart_path`` / ``docker_path``:
 
     apply(service, cfg)          # docker build+push → helm uninstall/upgrade
-    verify_runtime(service, cfg, phase=..., sub_goal=...)
+    verify_runtime(service, cfg, phase=...)
                                  # helm template workload detection →
                                  # kubectl wait 2-stage → smoke test
 
@@ -338,12 +338,11 @@ def verify_runtime(
     cfg: Config,
     *,
     phase: str | None = None,
-    sub_goal: str | None = None,
 ) -> list[CheckResult]:
     """Post-deploy verification: kubectl wait (2-stage) + smoke test.
 
-    ``phase`` and ``sub_goal`` select the smoke test file. If either is missing
-    smoke test is skipped.
+    ``phase`` selects the smoke test file (combined with ``service``).
+    If missing, smoke test is skipped.
     """
     rs = cfg.resolve(service)
     has_helm = rs.chart_path.is_dir()
@@ -379,13 +378,13 @@ def verify_runtime(
         results.append(_skip("smoke_test", "no chart — smoke test requires a cluster-side service"))
     elif not smoke_allowed:
         results.append(_skip("smoke_test"))
-    elif phase is None or sub_goal is None:
+    elif phase is None:
         results.append(_skip(
             "smoke_test",
-            "smoke test requires --phase and --sub-goal",
+            "smoke test requires --phase",
         ))
     else:
-        path = cfg.smoke_test_path(service, phase, sub_goal)
+        path = cfg.smoke_test_path(service, phase)
         results.append(_smoke_test(rs, cfg, path))
 
     return results

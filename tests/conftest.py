@@ -19,8 +19,8 @@ MINIMAL_YAML = dedent(
       workspace_dir: ws
       chart_path: "{workspace}/helm/{service}"
       docker_path: "{workspace}/docker/{service}"
-      smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{sub_goal}.sh"
-      release_name: "{service}-{active_env}-v1"
+      smoke_test_path: "{workspace}/tests/{phase}/smoke-test-{service}.sh"
+      release_name: "{service}"
       label_selector: "app.kubernetes.io/name={service}"
       values_files: ["values.yaml", "values-{active_env}.yaml"]
       write_allowed_globs: ["{workspace}/helm/**", "{workspace}/docker/**"]

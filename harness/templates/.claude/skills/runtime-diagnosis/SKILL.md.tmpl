@@ -52,7 +52,7 @@ Return exactly one of:
   - probe endpoint path wrong
 - **`smoke_test`** — cluster resources are healthy (all pods Ready,
   service routes traffic) but the smoke test script
-  (`{{workspace_dir}}/tests/<phase>/smoke-test-<sub_goal>.sh`) exits
+  (`{{workspace_dir}}/tests/<phase>/smoke-test-<service>.sh`) exits
   non-zero. The fix is a human reviewing the test, not an agent.
 - **`environment`** — root cause is outside the service's own files:
   missing namespace quota, missing secret, broken DNS, upstream
@@ -65,14 +65,14 @@ When logs reference a technology-specific error
 (e.g. *"Prometheus TSDB corruption at block 01GXYZ"*), consult
 project-local domain knowledge **before** reaching for `WebSearch`:
 
-1. If the caller passed `sub_goal_spec` (or a `phase`/`sub_goal`),
-   `Read context/phases/<phase>.md` and find the sub_goal's
+1. If the caller passed `service_spec` (or a `phase`/`service`),
+   `Read context/phases/<phase>.md` and find the service's
    `**references**:` field. Every path listed there is a
    `context/knowledge/*.md` file written specifically for this
    service's operational constraints — load them all.
 2. If no `**references**:` entry or the field is `[none]`, look for
    a conventionally-named `context/knowledge/<tech>.md` (derive
-   `<tech>` from the sub_goal's `**technology**:` field) and `Read`
+   `<tech>` from the service's `**technology**:` field) and `Read`
    it if present.
 3. Only after both miss, `WebSearch` upstream docs
    (prometheus.io, kubernetes.io, helm.sh). Cite the URL in your

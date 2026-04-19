@@ -35,7 +35,7 @@ task, forget it when done. Do **not** copy skill content into this file.
 |---|---|
 | Writing / editing Helm charts (`Chart.yaml`, `values*.yaml`, `templates/**`) | `.claude/skills/helm-chart-author/SKILL.md` |
 | Writing / editing a `Dockerfile` | `.claude/skills/docker-author/SKILL.md` |
-| Extracting a sub_goal spec from `context/phases/<phase>.md` | `.claude/skills/phase-spec-reader/SKILL.md` |
+| Extracting a service spec from `context/phases/<phase>.md` | `.claude/skills/phase-spec-reader/SKILL.md` |
 | Filling `values-dev.yaml` / `values-prod.yaml` from env matrix | `.claude/skills/cluster-env-inject/SKILL.md` |
 | Diagnosing a runtime failure (usually invoked by `runtime-diagnoser`) | `.claude/skills/runtime-diagnosis/SKILL.md` |
 
@@ -44,11 +44,11 @@ task, forget it when done. Do **not** copy skill content into this file.
 ## Subagents — when to call
 
 - **`deploy-orchestrator`** — the only way to run a full deploy cycle.
-  Invoked by `/deploy <phase> <sub_goal>`. Owns the verify-static →
+  Invoked by `/deploy <phase> <service>`. Owns the verify-static →
   apply → verify-runtime loop with a retry budget. Applies diagnoser
   proposals directly — the `guard-path` hook enforces path policy, and
-  every tool call is recorded to the session log for audit. Resolves
-  `service_name` from `context/phases/<phase>.md` → `## Sub-goal: <sub_goal>`,
+  every tool call is recorded to the session log for audit. Validates
+  that `context/phases/<phase>.md` contains `## Service: <service>`,
   so phase docs must exist before running.
 - **`runtime-diagnoser`** — read-only Kubernetes diagnosis. Call via
   `Task(subagent_type="runtime-diagnoser", prompt=...)` when:
@@ -62,14 +62,14 @@ Never call them from each other except in the documented direction
 
 ## Workflows
 
-### New sub_goal from scratch
+### New service from scratch
 
-1. Load `phase-spec-reader`, read the sub_goal section in
+1. Load `phase-spec-reader`, read the service section in
    `context/phases/<phase>.md`. Note the `**artifacts**:` field and
    the narrative bullets below — ports (with roles), replicas,
    resources, retention all live in the narrative, often under
    sub-headings like `**Port**:` / `**리소스**:`.
-2. **Load domain knowledge.** If the sub_goal's `**references**:`
+2. **Load domain knowledge.** If the service's `**references**:`
    is non-`[none]`, Read each listed `context/knowledge/*.md` file
    **before** authoring anything. These describe clustering,
    discovery, storage, or port-protocol constraints of the
@@ -94,13 +94,13 @@ Never call them from each other except in the documented direction
    and volume layout. Writes land immediately: `guard-path` blocks
    any path outside the workspace, and each Write/Edit is appended
    to the active session log by the `log-tool-call` hook.
-6. Confirm with the user, then suggest `/deploy <phase> <sub_goal>`.
+6. Confirm with the user, then suggest `/deploy <phase> <service>`.
 
 ### Iterate on an existing service
 
 1. Load the relevant author skill.
 2. Edit files under `{{workspace_dir}}/`.
-3. Run `/deploy <phase> <sub_goal>` (or
+3. Run `/deploy <phase> <service>` (or
    `python -m harness verify-static --service <svc>` if only static
    checks are in doubt).
 
@@ -118,13 +118,13 @@ the response without explicit user instruction.
 # Standalone invocations (CLI auto-generates a per-stage session log):
 python -m harness verify-static  --service <svc>
 python -m harness apply          --service <svc>
-python -m harness verify-runtime --service <svc> --phase <phase> --sub-goal <svc>
+python -m harness verify-runtime --service <svc> --phase <phase>
 
 # Orchestrator flow — share one session log across all three stages:
 LOG=$(python -m harness session-path --service <svc>)
 python -m harness verify-static  --service <svc> --session-log "$LOG"
 python -m harness apply          --service <svc> --session-log "$LOG"
-python -m harness verify-runtime --service <svc> --phase <p> --sub-goal <s> \
+python -m harness verify-runtime --service <svc> --phase <p> \
     --session-log "$LOG"
 ```
 
