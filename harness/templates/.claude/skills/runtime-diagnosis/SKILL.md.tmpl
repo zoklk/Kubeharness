@@ -1,0 +1,113 @@
+---
+name: runtime-diagnosis
+description: Investigation pattern for a runtime deployment failure — event → describe → logs → connectivity, with failure-source classification. Loaded by the runtime-diagnoser subagent; do not invoke from the main session.
+---
+
+# Runtime diagnosis
+
+You are diagnosing a failed `verify-runtime`, or answering a standalone
+*"why is X unhealthy?"* question. Your job is to produce evidence-based
+observations, classify the failure, and (when appropriate) propose a
+minimal file edit. You **do not** touch the cluster.
+
+## Tools you have
+
+- `Read` — project files (chart values, Dockerfile, session log).
+- `WebSearch` — upstream documentation when error messages reference
+  unfamiliar concepts.
+- `mcp__kagent__k8s_*` — read-only cluster queries.
+- `mcp__kagent__helm_*` — release inspection.
+
+No `Write`, no `Edit`, no `Bash`, no `kubectl`/`helm`/`docker`.
+
+## Investigation order
+
+Always proceed in this order — skipping a step risks misdiagnosis:
+
+1. **Session log tail.** `Read` the last ~200 lines of
+   `session_log`. The first `[exit N]` line before "verify-runtime"
+   shows the command that failed and its stderr.
+2. **Events.** `k8s_get_events -n <namespace>` filtered by the
+   service label. Warnings show scheduling, image pull, and CRD
+   issues before pod state does.
+3. **Describe.** `k8s_describe_resource` on the deployment /
+   statefulset / daemonset. Look for `Events:` at the bottom and
+   the `Conditions:` block.
+4. **Pod logs.** `k8s_get_pod_logs` on any pod in a terminal state
+   (`CrashLoopBackOff`, `Error`, `ImagePullBackOff`, …). Tail size
+   200 is usually sufficient.
+5. **Connectivity.** If the failure is a smoke test or a readiness
+   probe timeout, `k8s_check_service_connectivity` to confirm the
+   Service routes to a ready endpoint.
+
+## Classifying `failure_source`
+
+Return exactly one of:
+
+- **`implementation`** — evidence points at chart values, Dockerfile
+  content, or the image itself. The fix is a file edit.
+  Examples:
+  - config key missing in `values-dev.yaml`
+  - container `ENTRYPOINT` crashes at start
+  - probe endpoint path wrong
+- **`smoke_test`** — cluster resources are healthy (all pods Ready,
+  service routes traffic) but the smoke test script
+  (`{{workspace_dir}}/tests/<phase>/smoke-test-<sub_goal>.sh`) exits
+  non-zero. The fix is a human reviewing the test, not an agent.
+- **`environment`** — root cause is outside the service's own files:
+  missing namespace quota, missing secret, broken DNS, upstream
+  dependency down. Report with `suggestions`; do not propose edits
+  inside the service chart.
+
+## Domain knowledge before web search
+
+When logs reference a technology-specific error
+(e.g. *"Prometheus TSDB corruption at block 01GXYZ"*), consult
+project-local domain knowledge **before** reaching for `WebSearch`:
+
+1. If the caller passed `sub_goal_spec` (or a `phase`/`sub_goal`),
+   `Read context/phases/<phase>.md` and find the sub_goal's
+   `**references**:` field. Every path listed there is a
+   `context/knowledge/*.md` file written specifically for this
+   service's operational constraints — load them all.
+2. If no `**references**:` entry or the field is `[none]`, look for
+   a conventionally-named `context/knowledge/<tech>.md` (derive
+   `<tech>` from the sub_goal's `**technology**:` field) and `Read`
+   it if present.
+3. Only after both miss, `WebSearch` upstream docs
+   (prometheus.io, kubernetes.io, helm.sh). Cite the URL in your
+   `observations`.
+
+Project-local knowledge reflects the team's prior incidents and
+cluster-specific constraints; it is authoritative for this project
+in a way upstream docs cannot be.
+
+## Proposing a file edit
+
+Only when `failure_source == "implementation"`:
+
+1. `Read` the existing file you want to change.
+2. Draft the **full new content** — the orchestrator applies with
+   `Write`, which replaces the file.
+3. Minimize the diff. Change the key that's wrong; leave everything
+   else alone.
+4. Do **not** propose edits to `context/**`, `harness/**`,
+   `.claude/**`, `config/**`, `docs/**` — those are denied. If the
+   fix lives there, emit a `suggestion` instead.
+
+## Output shape
+
+Final message is **one JSON object** — nothing else:
+
+```json
+{
+  "service": "prometheus",
+  "failure_source": "implementation",
+  "observations": ["...short, evidence-grounded..."],
+  "proposed_files": [{"path": "...", "content": "..."}],
+  "suggestions": ["..."]
+}
+```
+
+If `failure_source` is `smoke_test` or `environment`, leave
+`proposed_files: []`.

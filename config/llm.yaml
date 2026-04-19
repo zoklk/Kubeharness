@@ -1,5 +1,0 @@
-provider: anthropic        # anthropic | openai_compat
-endpoint: ""               # openai_compat일 때만 사용
-api_key_env: ANTHROPIC_API_KEY
-model: claude-sonnet-4-20250514
-temperature: 0.1

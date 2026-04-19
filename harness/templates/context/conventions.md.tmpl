@@ -1,0 +1,92 @@
+# {{project_name}} — 규약
+
+이 하네스를 통해 배포되는 모든 서비스에 공통으로 적용되는 정적
+프로젝트 규약. 실제 값은 `config/harness.yaml` 에 있고, 이
+문서는 **왜** 그렇게 정했는지 — 기여자가 언제 따르고 언제 예외를
+둬도 되는지를 설명함.
+
+## 단일 진실의 원천
+
+`config/harness.yaml` 이 아래 값들의 단일 진실의 원천임:
+
+- `cluster.namespace` — 모든 배포가 들어가는 k8s 네임스페이스.
+- `conventions.workspace_dir` — 서비스 아티팩트가 사는 위치.
+  `harness init --workspace <dir>` 으로 정함.
+- `conventions.release_name` — 기본값 `"{service}-{active_env}-v1"`.
+  `-{active_env}-` 이 포함돼 dev/prod 릴리스가 한 클러스터에서
+  충돌 없이 공존함.
+- `conventions.label_selector` — 모든 워크로드가 반드시 붙여야 하는
+  레이블 (하네스가 `kubectl wait` / `kubectl get pods` 에 사용).
+- `conventions.image_tag` — docker 이미지가 push 되는 태그. 서비스
+  하나가 독립 버전을 갖는 경우에만 차트 안에서 따로 override.
+- `environments.<env>.arch` — 타깃 CPU arch. 하네스가
+  `docker build --platform linux/<arch>` 에 주입함.
+
+이 값들을 차트 파일이나 Dockerfile 에 중복 기재하지 말 것. YAML
+에서 읽거나, 하네스가 주입하도록 둘 것.
+
+## 서비스 레이아웃
+
+```
+{{workspace_dir}}/
+├── helm/<service>/
+│   ├── Chart.yaml
+│   ├── values.yaml
+│   ├── values-<env>.yaml
+│   └── templates/
+├── docker/<service>/
+│   └── Dockerfile
+└── tests/<phase>/
+    └── smoke-test-<sub_goal>.sh
+```
+
+- 서비스는 `helm/` 또는 `docker/` 중 적어도 하나는 존재해야 함.
+  둘 다 있어도 되고, 둘 다 없으면 설정 오류가 아니라 "검출되지
+  않는 서비스" 로 처리됨.
+- 스모크 테스트는 선택이지만 권장함. `kubectl wait` 통과 뒤에
+  실행됨.
+
+## 레이블 (필수)
+
+```yaml
+metadata:
+  labels:
+    app.kubernetes.io/name: <service>      # == Chart.Name
+    app.kubernetes.io/instance: <release>  # == Release.Name
+    app.kubernetes.io/managed-by: Helm
+```
+
+하네스의 `kubectl wait` 와 `kubectl get pods` 쿼리는 `label_selector`
+로 pod 를 타깃팅함 — 레이블이 없으면 wait 도 없음.
+
+## 네이밍
+
+- 서비스 slug: `[a-z][a-z0-9-]*`. `helm/`/`docker/` 아래 폴더명,
+  그리고 phase 스펙의 `**service_name**:` 필드와 일치해야 함.
+- 릴리스 이름: `conventions.release_name` 이 계산함 — 절대
+  하드코딩 금지.
+- 이미지 (자가 빌드): `<registry>/<service>:<image_tag>` — CLI 가
+  조립함. `{{workspace_dir}}/docker/<service>/Dockerfile` 이
+  존재할 때만 해당함.
+- 이미지 (업스트림 사용): `Dockerfile` 이 없으면 빌드/푸시 단계가
+  실행되지 않음. `values.yaml` 의 `image.repository` 는 업스트림
+  경로를 그대로 씀 (예: `emqx/emqx`, `bitnami/postgresql`).
+  `<registry>/<service>` 로 바꾸지 말 것 — 그 레지스트리에 해당
+  이미지가 올라가 있지 않음.
+
+## 프로젝트 고유 규약
+
+TODO(init): 이 프로젝트만의 규약을 여기에 적을 것. 위 섹션들은
+kubeharness 가 강제하는 공통 규약이고, 아래는 덮어쓰거나 추가할
+자리임. 예:
+
+- 필수 추가 레이블 (예: `team=<name>`, `cost-center=<code>`)
+- helm values 레이아웃이 다르다면 (예: values 디렉터리 분리,
+  secrets 관리 플러그인)
+- 네트워킹/스토리지 관례 (ingress class 이름, PVC storageClass,
+  기본 NetworkPolicy)
+- 위 "네이밍" 규칙에서 예외를 두는 서비스군
+- 배포 시간대·점검창 (특정 요일/시간에 배포 금지)
+
+비우지 말 것 — 비어 있으면 에이전트가 kubeharness 기본 전제만
+갖고 움직여서 프로젝트 맥락과 어긋난 아티팩트를 만듦.
