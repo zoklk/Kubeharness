@@ -204,9 +204,14 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
   │         └── helm template 파싱, kubectl_wait_staged, smoke_test
   │
   │  runtime fail 시:
-  ├─►  Task(subagent_type="runtime-diagnoser", prompt=<요약 + 로그 경로>)
-  │         └── diagnoser 가 Read 로 세션 로그를 열람, kagent 쿼리,
-  │             observations + proposed_files 를 JSON 으로 반환
+  ├─►  Task(subagent_type="runtime-diagnoser",
+  │         prompt=<service/phase + verify_runtime_response (log_tail 포함) + 로그 경로>)
+  │         └── prompt 의 log_tail 로 가설 수립 (Step 0) →
+  │             Branch A (non-smoke): 가설 1개 → 반증용 kagent 쿼리, 최대 3 cycle,
+  │             Branch B (smoke_test): smoke 소스 1 Read + readiness 1 쿼리,
+  │                                    proposed_files=[] 고정,
+  │             Fallback: log_tail 비semantic 시 events→describe→logs sweep →
+  │             observations + proposed_files + suggestions 를 JSON 으로 반환
   │
   │  proposed_files 가 비어있지 않으면:
   ├─►  각각에 대해 Write(...) — `allow` 권한으로 중단 없이 진행
@@ -294,7 +299,7 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
   --- [TOOL/Edit] 13:14:25 | ok | {workspace}/helm/emqx/values.yaml | lines_changed=3->5 ---
   --- [TOOL/Task] 14:32:05 | ok | subagent=runtime-diagnoser | emqx cluster fail ---
   <<< subagent response >>>
-  {"service":"emqx","failed_stage":"verify-runtime","root_cause":"..."}
+  {"service":"emqx","failure_source":"implementation","observations":["..."],"proposed_files":[{"path":"...","content":"..."}],"suggestions":[]}
   <<< end >>>
   ```
   Task 호출은 예외적으로 subagent 응답 본문을 함께 덤프함 (4000자 cap). diagnoser 결과가 orchestrator Task 반환값으로만 흐르고 세션 로그에 남지 않는 갭을 막기 위함. 훅은 `.harness/current-session-log` 포인터로 활성 로그를 찾음. LLM 은 이 줄을 읽지 않음 — 훅이 Claude Code 런타임에서 실행돼 토큰 비용 0.
