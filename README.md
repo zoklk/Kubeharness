@@ -45,10 +45,11 @@ CLI 는 아래 도구들을 shell out 해서 사용함. 없는 도구는 해당 
 
 파이썬 CLI 자체는 kagent 에 의존하지 **않음** — 없어도 `verify-static` / `apply` / `verify-runtime` 은 모두 동작함. kagent 는 **진단 품질을 올리는 확장**이고, 아래 두 곳에 wiring 만 해 둔 상태임:
 
-1. **MCP 서버 URL** — `.claude/settings.json` 의 `mcpServers.kagent.url`. init 직후 `TODO(init): replace with kagent service DNS + port ...` 플레이스홀더가 들어가 있으므로, 본인 클러스터의 kagent 서비스 DNS+포트 (예: `http://kagent-tools.kagent:<port>/mcp`) 로 교체할 것.
+1. **MCP 서버 URL** — `.mcp.json` (프로젝트 루트). init 직후 `mcpServers.kagent.url` 에 `TODO(init): replace with kagent service DNS + port ...` 플레이스홀더가 들어가 있으므로, 본인 클러스터의 kagent 서비스 DNS+포트 (예: `http://kagent-tools.kagent:8084/mcp`) 로 교체할 것. Claude Code 는 프로젝트 MCP 서버를 `.mcp.json` 또는 `~/.claude.json` 에서만 읽는다 — `.claude/settings.json` 에 `mcpServers` 를 둬도 무시되니 주의.
 2. **툴 권한** — `.claude/settings.json` 에 kagent 툴이 두 단계로 나뉘어 있음. 조회성 툴(`k8s_get_*`, `k8s_describe_*`, `helm_get_*`, `cilium_*` 등)은 `permissions.allow` 로 자동 승인, pod 내부 임의 명령을 실행하는 `mcp__kagent__k8s_execute_command` 만 `permissions.ask` 로 호출마다 승인. 조회도 프롬프트를 받으려면 `allow` → `ask` 이동, 아예 쓰지 않으려면 라인 삭제.
+3. **Trust 승인** — `.mcp.json` 이 새로 생기거나 변경된 직후 첫 Claude Code 세션에서 `Use this MCP server?` 다이얼로그가 뜸. enable 해야 `/mcp` 에 `kagent connected` 가 잡힘. 거절했다면 `~/.claude.json` 의 `disabledMcpjsonServers` 에 들어갔다는 뜻 — 거기서 빼고 재시작.
 
-쓰지 않기로 했다면 `settings.json` 의 `mcpServers.kagent` 블록을 통째로 지울 것 — 그냥 두면 세션 시작 시 연결 실패 경고가 뜸.
+쓰지 않기로 했다면 `.mcp.json` 의 `kagent` 블록을 통째로 지울 것 — 그냥 두면 세션 시작 시 연결 실패 경고가 뜸.
 
 ## 빠른 시작
 
@@ -109,8 +110,9 @@ my-infra/
 │                               #   (클러스터링/포트/스토리지 등 코드로 추론 불가한 제약)
 ├── workspace/                  # 사용자 아티팩트 영역 (--workspace 로 이름 지정)
 │   └── tests/_template.sh      # 스모크 테스트 뼈대 — <phase>/smoke-test-<service>.sh 로 복사
+├── .mcp.json                   # Claude Code 가 읽는 프로젝트 MCP 서버 정의 (kagent URL)
 └── .claude/                    # Claude Code 전용 wiring (다른 에이전트는 무시)
-    ├── settings.json           # 권한(allow/deny/ask) + PreToolUse/PostToolUse 훅 + kagent MCP
+    ├── settings.json           # 권한(allow/deny/ask) + PreToolUse/PostToolUse 훅
     ├── commands/deploy.md      # /deploy <phase> <service> 슬래시 명령
     ├── agents/
     │   ├── deploy-orchestrator.md   # 메인 배포 루프 (Write/Edit 가능)
@@ -168,9 +170,9 @@ python -m harness update                # 실제 덮어쓰기
 ```
 
 **덮어쓰는 것**: `.claude/agents/`, `.claude/skills/`, `.claude/hooks/`, `.claude/commands/`, `AGENTS.md`, `CLAUDE.md` (하네스 소유).
-**건드리지 않는 것**: `config/**`, `context/**`, `{workspace_dir}/**`, `.claude/settings.json` (사용자 영역).
+**건드리지 않는 것**: `config/**`, `context/**`, `{workspace_dir}/**`, `.claude/settings.json`, `.mcp.json` (사용자 영역).
 
-`{{project_name}}` 과 `{{workspace_dir}}` 는 `AGENTS.md` 첫 줄과 `config/harness.yaml` 의 `conventions.workspace_dir` 에서 자동 감지함. 필요하면 `--name` · `--workspace` 로 명시 가능. `settings.json` 변경은 이 명령이 처리하지 않으므로 `harness/templates/.claude/settings.json.tmpl` 과 수동 diff 할 것.
+`{{project_name}}` 과 `{{workspace_dir}}` 는 `AGENTS.md` 첫 줄과 `config/harness.yaml` 의 `conventions.workspace_dir` 에서 자동 감지함. 필요하면 `--name` · `--workspace` 로 명시 가능. `settings.json` · `.mcp.json` 변경은 이 명령이 처리하지 않으므로 `harness/templates/.claude/settings.json.tmpl` · `harness/templates/.mcp.json.tmpl` 과 수동 diff 할 것. 기존 프로젝트에 `.mcp.json` 이 없는 경우(예: 0.1.x → 2.0.0 마이그레이션) 새 init 을 같은 디렉터리에서 다시 돌리면 missing 파일만 생성됨 — `python -m harness init --workspace <기존값>`.
 
 ## 설정
 
