@@ -27,78 +27,98 @@ SESSION_LOG="$(head -n 1 "$POINTER" | tr -d '\n')"
 
 PAYLOAD="$(cat)"
 
-HARNESS_SESSION_LOG="$SESSION_LOG" HARNESS_PAYLOAD="$PAYLOAD" python3 - <<'PY' || true
+HARNESS_SESSION_LOG="$SESSION_LOG" HARNESS_PAYLOAD="$PAYLOAD" python3 - 2>>/tmp/hook-debug.log <<'PY' || true
 import json
 import os
 import time
+import traceback
 from pathlib import Path
 
-log_path = Path(os.environ["HARNESS_SESSION_LOG"])
 try:
-    payload = json.loads(os.environ.get("HARNESS_PAYLOAD", "") or "{}")
-except json.JSONDecodeError:
-    raise SystemExit(0)
+    log_path = Path(os.environ["HARNESS_SESSION_LOG"])
+    try:
+        payload = json.loads(os.environ.get("HARNESS_PAYLOAD", "") or "{}")
+    except json.JSONDecodeError:
+        raise SystemExit(0)
 
-tool = payload.get("tool_name") or payload.get("tool") or "?"
-tool_input = payload.get("tool_input") or {}
-tool_response = payload.get("tool_response") or {}
+    tool = payload.get("tool_name") or payload.get("tool") or "?"
+    raw_input = payload.get("tool_input")
+    raw_response = payload.get("tool_response")
+    # MCP tool responses may arrive as list (e.g. [{type:"text",...}]) rather
+    # than dict — guard against AttributeError on .get() calls below.
+    tool_input = raw_input if isinstance(raw_input, dict) else {}
+    tool_response = raw_response if isinstance(raw_response, dict) else {}
 
-# Build a one-line detail field appropriate to the tool kind.
-detail_parts: list[str] = []
-if tool in ("Write", "Edit"):
-    fp = tool_input.get("file_path", "")
-    if fp:
-        detail_parts.append(fp)
-    if tool == "Edit":
-        old = tool_input.get("old_string", "") or ""
-        new = tool_input.get("new_string", "") or ""
-        detail_parts.append(f"lines_changed={len(old.splitlines())}->{len(new.splitlines())}")
-    elif tool == "Write":
-        content = tool_input.get("content", "") or ""
-        detail_parts.append(f"lines={len(content.splitlines())}")
-elif tool == "Task":
-    sub = tool_input.get("subagent_type", "?")
-    desc = tool_input.get("description", "") or ""
-    detail_parts.append(f"subagent={sub}")
-    if desc:
-        detail_parts.append(desc[:60])
-elif tool.startswith("mcp__kagent__"):
-    # Keep arg summary compact — full bodies go into agent context, not here.
-    args_compact = {k: v for k, v in tool_input.items() if isinstance(v, (str, int, bool))}
-    if args_compact:
-        detail_parts.append(json.dumps(args_compact, ensure_ascii=False)[:200])
+    # Build a one-line detail field appropriate to the tool kind.
+    detail_parts: list[str] = []
+    if tool in ("Write", "Edit"):
+        fp = tool_input.get("file_path", "")
+        if fp:
+            detail_parts.append(fp)
+        if tool == "Edit":
+            old = tool_input.get("old_string", "") or ""
+            new = tool_input.get("new_string", "") or ""
+            detail_parts.append(f"lines_changed={len(old.splitlines())}->{len(new.splitlines())}")
+        elif tool == "Write":
+            content = tool_input.get("content", "") or ""
+            detail_parts.append(f"lines={len(content.splitlines())}")
+    elif tool == "Task":
+        sub = tool_input.get("subagent_type", "?")
+        desc = tool_input.get("description", "") or ""
+        detail_parts.append(f"subagent={sub}")
+        if desc:
+            detail_parts.append(desc[:60])
+    elif tool.startswith("mcp__kagent__"):
+        # Keep arg summary compact — full bodies go into agent context, not here.
+        args_compact = {k: v for k, v in tool_input.items() if isinstance(v, (str, int, bool))}
+        if args_compact:
+            detail_parts.append(json.dumps(args_compact, ensure_ascii=False)[:200])
 
-# Result status: PostToolUse runs after execution, so presence of a
-# non-empty tool_response means success; an explicit error surfaces as
-# is_error in the response.
-is_error = bool(tool_response.get("is_error"))
-status = "error" if is_error else "ok"
+    # Tag subagent-internal calls so the audit trail shows where they came from.
+    agent_type = payload.get("agent_type")
+    if agent_type:
+        detail_parts.append(f"agent={agent_type}")
 
-ts = time.strftime("%H:%M:%S")
-header = f"--- [TOOL/{tool}] {' | '.join([ts, status] + detail_parts)} ---\n"
+    # Result status: PostToolUse runs after execution, so presence of a
+    # non-empty tool_response means success; an explicit error surfaces as
+    # is_error in the response.
+    is_error = bool(tool_response.get("is_error"))
+    status = "error" if is_error else "ok"
 
-# For Task, also dump the subagent's response body so the main-session
-# audit trail captures diagnoser findings (otherwise only visible to
-# the orchestrator via the Task tool return value).
-body = ""
-if tool == "Task":
-    content = tool_response.get("content")
-    text = ""
-    if isinstance(content, str):
-        text = content
-    elif isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
-                text += block.get("text", "")
-    if text:
-        cap = 4000
-        if len(text) > cap:
-            text = text[:cap] + f"\n[truncated: {len(text) - cap} bytes]"
-        body = "<<< subagent response >>>\n" + text.rstrip("\n") + "\n<<< end >>>\n"
+    ts = time.strftime("%H:%M:%S")
+    header = f"--- [TOOL/{tool}] {' | '.join([ts, status] + detail_parts)} ---\n"
 
-log_path.parent.mkdir(parents=True, exist_ok=True)
-with log_path.open("a", encoding="utf-8") as f:
-    f.write(header + body)
+    # For Task, also dump the subagent's response body so the main-session
+    # audit trail captures diagnoser findings (otherwise only visible to
+    # the orchestrator via the Task tool return value).
+    body = ""
+    if tool == "Task":
+        content = tool_response.get("content")
+        text = ""
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text += block.get("text", "")
+        if text:
+            cap = 4000
+            if len(text) > cap:
+                text = text[:cap] + f"\n[truncated: {len(text) - cap} bytes]"
+            body = "<<< subagent response >>>\n" + text.rstrip("\n") + "\n<<< end >>>\n"
+
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(header + body)
+except SystemExit:
+    raise
+except Exception:
+    # stderr is redirected by the surrounding shell to /tmp/hook-debug.log,
+    # so the traceback surfaces there instead of getting silently dropped.
+    import sys as _sys
+    keys = list(payload.keys()) if "payload" in dir() else "?"
+    print(f"[hook-error log-tool-call] payload_keys={keys}", file=_sys.stderr)
+    traceback.print_exc()
 PY
 
 exit 0
