@@ -53,30 +53,36 @@ Optional:
 
 ## Workflow
 
-1. If `session_log` is set, `Read` the tail of that file to find the
-   first failing check and its `log_tail`.
-2. **Load domain knowledge.** If the Task prompt carries a `phase` /
-   `service` (or `service_spec`), `Read context/phases/<phase>.md`,
-   find the service's `**references**:` field, and `Read` every
-   `context/knowledge/*.md` path it lists. Scan the service's
-   narrative bullets too — port roles, retention, resource sizing
-   often name the exact constraint that's being violated. See the
-   `runtime-diagnosis` skill's "Domain knowledge before web search"
-   section for precedence rules.
-3. Classify the failure into `failure_source`:
+1. **Read the failure signal that's already in your prompt.**
+   `verify_runtime_response.checks[*]` carries each failed check's
+   `log_tail` (up to 2000 chars of combined stdout/stderr). That
+   payload is your starting point — do **not** `Read` `session_log`
+   first; the tail is already there. Only escalate to a fuller
+   session log read when 2000 chars truncated mid-message.
+2. **Load domain knowledge** if the failure references
+   technology-specific behavior. If the Task prompt carries a
+   `phase` / `service` (or `service_spec`), `Read
+   context/phases/<phase>.md`, find the service's `**references**:`
+   field, and `Read` every `context/knowledge/*.md` path it lists.
+   Scan the service's narrative bullets too — port roles, retention,
+   resource sizing often name the exact constraint being violated.
+   See the `runtime-diagnosis` skill's "Domain knowledge before web
+   search" section for precedence rules.
+3. **Follow the SKILL's branched investigation.** Branch A (non-
+   smoke, hypothesis-first from log_tail), Branch B (smoke_test,
+   bounded smoke source read + one readiness query), or Fallback
+   sweep when log_tail is non-semantic. The SKILL is authoritative
+   for tool order; do **not** run a full
+   events → describe → logs → connectivity sweep by default.
+4. **Classify** into `failure_source`:
    - `implementation` — chart values, Dockerfile, or image content
      wrong. Fixable with a file edit.
-   - `smoke_test` — the deployment is healthy but the smoke test
-     script rejects it. Needs human review of the test.
-   - `environment` — cluster or dependency issue outside the service
-     (missing namespace quota, broken DNS, missing secret). Not
-     fixable inside the service's chart.
-4. Gather evidence via kagent:
-   - `k8s_get_events -n <namespace>` for recent warnings.
-   - `k8s_describe_resource` on the deployment/statefulset.
-   - `k8s_get_pod_logs` for any pod in a terminal state.
-   - `k8s_check_service_connectivity` if a smoke test failed on a
-     network call.
+   - `smoke_test` — pods are `Ready` but the smoke test script
+     rejects the deployment. Needs human review of the test or the
+     service. `proposed_files` MUST be empty in this case.
+   - `environment` — cluster or dependency issue outside the
+     service (missing namespace quota, broken DNS, missing secret).
+     Not fixable inside the service's chart.
 5. If the root cause suggests a file edit (typically chart values or
    Dockerfile), draft the minimal change. Use `Read` to load the
    existing file first; never invent content.
