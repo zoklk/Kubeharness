@@ -143,7 +143,7 @@ def _helm_apply(rs: ResolvedService, cfg: Config) -> list[CheckResult]:
         "helm", "upgrade", "--install", rs.release_name, str(rs.chart_path),
         "-n", rs.namespace,
         "--create-namespace",
-        "--timeout", "60s",
+        "--timeout", "180s",
         *_values_args(rs),
     ]
     up = shell.run(upgrade_cmd, label="apply/helm_install")
