@@ -12,7 +12,8 @@ Preserved from the legacy ``runtime_gates.py`` (refactor.md §21):
 - ``helm uninstall`` before ``helm upgrade --install`` (immutable field workaround)
 - ``kubectl wait`` 2-stage: ``initial_wait_seconds`` probe → terminal-state detection
   → ``terminal_grace_seconds`` grace window
-- CRD-only chart auto-skip (parse ``helm template`` stdout for workload kinds)
+- CRD-only and batch-only (Job/CronJob) charts skip the pod readiness wait
+  (parse ``helm template`` stdout for workload kinds)
 - Smoke test env injection (SERVICE, NAMESPACE, RELEASE_NAME, ACTIVE_ENV, DOMAIN_SUFFIX)
 """
 
@@ -36,12 +37,16 @@ _TERMINAL_STATES = frozenset({
     "Error", "OOMKilled", "InvalidImageName", "CreateContainerConfigError",
 })
 
-# kinds that require pod readiness waiting; if chart contains none of these
-# the chart is CRD-only and kubectl wait is skipped
-_WORKLOAD_KINDS = frozenset({
-    "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet",
-    "Job", "CronJob", "Pod",
+# workload kinds whose pods reach a steady-state ``Ready`` condition — these are
+# the only ones ``kubectl wait --for=condition=Ready`` can meaningfully wait on
+_LONGRUNNING_WORKLOAD_KINDS = frozenset({
+    "Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Pod",
 })
+# one-shot / scheduled workloads — their pods never become ``Ready`` (they end
+# ``Succeeded``, or are deleted by a Helm hook delete-policy)
+_BATCH_WORKLOAD_KINDS = frozenset({"Job", "CronJob"})
+# any workload kind; a chart rendering none of these is CRD-only
+_WORKLOAD_KINDS = _LONGRUNNING_WORKLOAD_KINDS | _BATCH_WORKLOAD_KINDS
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
@@ -187,12 +192,15 @@ def apply(service: str, cfg: Config) -> list[CheckResult]:
 # ─── verify_runtime ──────────────────────────────────────────────────────────
 
 
-def _chart_has_workloads(rs: ResolvedService, cfg: Config) -> bool:
-    """Parse ``helm template`` output; return True if any workload kind is rendered.
+def _chart_workload_classes(rs: ResolvedService, cfg: Config) -> tuple[bool, bool]:
+    """Parse ``helm template`` output → ``(has_longrunning, has_batch)``.
 
-    On template failure (network, missing deps, etc.) we default to True so
-    kubectl wait still runs — a conservative choice that preserves behavior
-    of the legacy ``runtime_gates.py``.
+    ``has_longrunning`` is True if the chart renders any Deployment/StatefulSet/
+    DaemonSet/ReplicaSet/Pod; ``has_batch`` if it renders any Job/CronJob.
+
+    On template failure (network, missing deps, etc.) or unparseable YAML we
+    default to ``(True, False)`` so kubectl wait still runs — a conservative
+    choice that preserves behavior of the legacy ``runtime_gates.py``.
     """
     cmd = [
         "helm", "template", rs.release_name, str(rs.chart_path),
@@ -201,14 +209,20 @@ def _chart_has_workloads(rs: ResolvedService, cfg: Config) -> bool:
     ]
     r = shell.run(cmd, label="verify-runtime/helm_template", log_stdout=False)
     if not r.ok:
-        return True
+        return True, False
+    longrunning = batch = False
     try:
-        return any(
-            isinstance(doc, dict) and doc.get("kind") in _WORKLOAD_KINDS
-            for doc in yaml.safe_load_all(r.stdout)
-        )
+        for doc in yaml.safe_load_all(r.stdout):
+            if not isinstance(doc, dict):
+                continue
+            kind = doc.get("kind")
+            if kind in _LONGRUNNING_WORKLOAD_KINDS:
+                longrunning = True
+            elif kind in _BATCH_WORKLOAD_KINDS:
+                batch = True
     except yaml.YAMLError:
-        return True
+        return True, False
+    return longrunning, batch
 
 
 def _pods_sidecar_path() -> Path | None:
@@ -271,6 +285,11 @@ def _detect_terminal_failure(
 
 
 def _kubectl_wait(rs: ResolvedService, timeout_seconds: int) -> shell.RunResult:
+    # NOTE: this waits on *all* pods matching ``label_selector``. A chart that
+    # mixes a Deployment with a Job/CronJob (or a lingering Helm-hook Job pod)
+    # under the same labels can stall here — batch pods never go ``Ready``. The
+    # proper fix is to wait on workload resources (Deployment --for=
+    # condition=Available) rather than pods; tracked as a follow-up refactor.
     return shell.run(
         [
             "kubectl", "wait", "pods",
@@ -343,6 +362,10 @@ def verify_runtime(
 
     ``phase`` selects the smoke test file (combined with ``service``).
     If missing, smoke test is skipped.
+
+    ``kubectl wait`` is skipped for CRD-only charts and for batch-only charts
+    (only Job/CronJob workloads) — neither has steady-state pods to wait on —
+    while the smoke test still runs.
     """
     rs = cfg.resolve(service)
     has_helm = rs.chart_path.is_dir()
@@ -360,17 +383,25 @@ def verify_runtime(
     if has_helm:
         if not cfg.checks.runtime.kubectl_wait.enabled:
             results.append(_skip("kubectl_wait", "disabled in config"))
-        elif not _chart_has_workloads(rs, cfg):
-            results.append(CheckResult(
-                name="kubectl_wait",
-                status="skip",
-                detail="CRD-only chart: no workload resources",
-            ))
         else:
-            kw = _kubectl_wait_staged(rs, cfg)
-            results.append(kw)
-            if kw.status == "fail":
-                smoke_allowed = False
+            has_longrunning, has_batch = _chart_workload_classes(rs, cfg)
+            if not has_longrunning and not has_batch:
+                results.append(CheckResult(
+                    name="kubectl_wait",
+                    status="skip",
+                    detail="CRD-only chart: no workload resources",
+                ))
+            elif not has_longrunning:  # only Job/CronJob workloads
+                results.append(CheckResult(
+                    name="kubectl_wait",
+                    status="skip",
+                    detail="batch-only chart (Job/CronJob): no steady-state pods to wait on",
+                ))
+            else:
+                kw = _kubectl_wait_staged(rs, cfg)
+                results.append(kw)
+                if kw.status == "fail":
+                    smoke_allowed = False
 
     if not cfg.checks.runtime.smoke_test:
         results.append(_skip("smoke_test", "disabled in config"))

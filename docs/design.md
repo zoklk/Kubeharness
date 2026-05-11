@@ -122,7 +122,11 @@ DOCKER_CHECKS = {hadolint, gitleaks_docker}
 
 **`verify_runtime(service, cfg, *, phase)`** — 배포 후:
 
-1. **CRD-only chart 감지.** `helm template` 을 돌려 렌더된 YAML 을 파싱. `kind` 가 `{Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, Pod}` 중 하나도 없으면 CRD-only chart 로 간주해 `kubectl_wait` 를 skip. template 실패 시엔 "workload 있음"으로 보수적으로 처리 — 레거시 동작 보존.
+1. **workload class 감지.** `helm template` 을 돌려 렌더된 YAML 을 파싱.
+   - long-running workload(`Deployment, StatefulSet, DaemonSet, ReplicaSet, Pod`) 가 하나도 없으면:
+     - batch workload(`Job, CronJob`) 도 없음 → CRD-only chart 로 간주해 `kubectl_wait` skip.
+     - batch workload 만 있음 → batch-only chart (steady-state 로 `Ready` 가 되는 파드가 없음) → `kubectl_wait` skip. 스모크 테스트는 그대로 실행.
+   - template 실패 / YAML 파싱 실패 시엔 "long-running workload 있음"으로 보수적으로 처리 — 레거시 동작 보존.
 
 2. **2단계 kubectl wait.** 2-phase wait 패턴:
    - 1차 probe: `kubectl wait pods --for=condition=Ready --timeout=<initial_wait_seconds>s`
