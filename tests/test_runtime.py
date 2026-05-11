@@ -133,6 +133,22 @@ _CRD_YAML = (
     "metadata:\n  name: foos.example.com\n"
 )
 
+_CRONJOB_YAML = (
+    "apiVersion: batch/v1\n"
+    "kind: CronJob\n"
+    "metadata:\n  name: svc\n"
+)
+
+_HOOK_JOB_YAML = (
+    "apiVersion: batch/v1\n"
+    "kind: Job\n"
+    "metadata:\n"
+    "  name: svc-migrate\n"
+    "  annotations:\n    helm.sh/hook: post-install\n"
+)
+
+_DEPLOY_PLUS_CRONJOB_YAML = _DEPLOY_YAML + "---\n" + _CRONJOB_YAML
+
 
 def test_verify_runtime_crd_only_chart_skips_kubectl_wait(cfg, helm_chart, stub):
     stub.set("verify-runtime/helm_template", stdout=_CRD_YAML)
@@ -142,12 +158,58 @@ def test_verify_runtime_crd_only_chart_skips_kubectl_wait(cfg, helm_chart, stub)
     assert "CRD-only" in (kw.detail or "")
 
 
+def test_verify_runtime_cronjob_only_chart_skips_wait_but_runs_smoke(
+    cfg, helm_chart, stub, tmp_path
+):
+    stub.set("verify-runtime/helm_template", stdout=_CRONJOB_YAML)
+    smoke_path = tmp_path / "ws" / "tests" / "p1"
+    smoke_path.mkdir(parents=True)
+    (smoke_path / "smoke-test-svc.sh").write_text("#!/bin/bash\nexit 0\n")
+    results = runtime.verify_runtime("svc", cfg, phase="p1")
+    kw = next(r for r in results if r.name == "kubectl_wait")
+    assert kw.status == "skip"
+    assert "batch-only" in (kw.detail or "")
+    # batch-only skip must not block the smoke test
+    smoke = next(r for r in results if r.name == "smoke_test")
+    assert smoke.status == "pass"
+    assert any(label == "verify-runtime/smoke_test" for label, _ in stub.calls)
+    # no kubectl wait should have been attempted
+    assert not any(label == "verify-runtime/kubectl_wait" for label, _ in stub.calls)
+
+
+def test_verify_runtime_hook_job_only_chart_skips_wait(cfg, helm_chart, stub):
+    stub.set("verify-runtime/helm_template", stdout=_HOOK_JOB_YAML)
+    results = runtime.verify_runtime("svc", cfg)
+    kw = next(r for r in results if r.name == "kubectl_wait")
+    assert kw.status == "skip"
+    assert "batch-only" in (kw.detail or "")
+
+
+def test_verify_runtime_deployment_plus_cronjob_still_waits(cfg, helm_chart, stub):
+    stub.set("verify-runtime/helm_template", stdout=_DEPLOY_PLUS_CRONJOB_YAML)
+    stub.set("verify-runtime/kubectl_wait", exit_code=0)
+    results = runtime.verify_runtime("svc", cfg)
+    kw = next(r for r in results if r.name == "kubectl_wait")
+    assert kw.status == "pass"
+    assert any(label == "verify-runtime/kubectl_wait" for label, _ in stub.calls)
+
+
 def test_verify_runtime_kubectl_wait_pass(cfg, helm_chart, stub):
     stub.set("verify-runtime/helm_template", stdout=_DEPLOY_YAML)
     stub.set("verify-runtime/kubectl_wait", exit_code=0)
     results = runtime.verify_runtime("svc", cfg)
     kw = next(r for r in results if r.name == "kubectl_wait")
     assert kw.status == "pass"
+
+
+def test_verify_runtime_helm_template_failure_waits_conservatively(cfg, helm_chart, stub):
+    # helm template fails → assume workloads present → kubectl wait still runs
+    stub.set("verify-runtime/helm_template", exit_code=1, stderr="template error")
+    stub.set("verify-runtime/kubectl_wait", exit_code=0)
+    results = runtime.verify_runtime("svc", cfg)
+    kw = next(r for r in results if r.name == "kubectl_wait")
+    assert kw.status == "pass"
+    assert any(label == "verify-runtime/kubectl_wait" for label, _ in stub.calls)
 
 
 def test_verify_runtime_terminal_state_early_exit(cfg, helm_chart, stub):

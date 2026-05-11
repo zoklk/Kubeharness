@@ -382,7 +382,7 @@ def run(cmd: list[str], *,
 - `verify_runtime()` 흐름:
   1. `chart_path.exists()` →
      - `kubectl wait` 2단계: `initial_wait_seconds` 대기 → pod 상태 조회 → terminal(`CrashLoopBackOff`, `ImagePullBackOff`, `ErrImagePull`, `Error`, `OOMKilled`) 감지 시 즉시 fail, 아니면 `terminal_grace_seconds` 추가 대기
-     - `helm template` 분석 후 workload 리소스가 없는 CRD-only chart 는 자동 skip
+     - `helm template` 분석 후 long-running workload 가 없는 chart 는 `kubectl wait` 자동 skip — workload 가 아예 없으면 CRD-only, `Job`/`CronJob` 만 있으면 batch-only (둘 다 steady-state 파드 없음)
   2. `smoke_test_path` 존재 → 실행 (kubectl wait 실패 시 skip)
   3. `chart_path` 없고 `docker_path` 만 존재 → push 성공 여부가 runtime 통과
 
@@ -913,10 +913,11 @@ terminal_states = {"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull",
    - 타임아웃 → fail
 ```
 
-CRD-only chart skip:
+CRD-only / batch-only chart skip:
 - `helm template <chart>` 실행 후 출력 YAML 의 `kind` 필드 수집
-- workload kind 가 `{Deployment, StatefulSet, DaemonSet, Job, CronJob, Pod, ReplicaSet}` 중 하나라도 있으면 대기
-- 전부 CRD/RBAC/ConfigMap/Secret 류면 kubectl wait skip → pass
+- long-running workload(`{Deployment, StatefulSet, DaemonSet, ReplicaSet, Pod}`) 가 하나라도 있으면 대기
+- long-running workload 가 없고 `Job`/`CronJob` 만 있으면 batch-only → kubectl wait skip → pass (스모크는 실행)
+- 전부 CRD/RBAC/ConfigMap/Secret 류면 CRD-only → kubectl wait skip → pass
 
 ### 21.4 Smoke test 실행 규약
 
