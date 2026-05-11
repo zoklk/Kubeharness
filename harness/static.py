@@ -121,9 +121,21 @@ def check_kubeconform(rs: ResolvedService, cfg: Config) -> CheckResult:
     return _from_result("kubeconform", r, cfg.logging.tail_chars)
 
 
+# Collapse trivy's verbose table output (per-finding description + code snippet)
+# into one line per misconfiguration: "<id> <severity> <file>:<start>-<end>  <message>".
+# The message is finding-specific ("Container 'manager' ... should set ..."), so it
+# stays actionable; the rule id reconstructs the AVD url if more detail is needed.
+_TRIVY_JQ = (
+    r'.Results[]? | .Target as $t | .Misconfigurations[]? '
+    r'| "\(.ID) \(.Severity) \($t):\(.CauseMetadata.StartLine)-\(.CauseMetadata.EndLine)  \(.Message)"'
+)
+
+
 def check_trivy_config(rs: ResolvedService, cfg: Config) -> CheckResult:
-    r = shell.run(
-        ["trivy", "config", "--exit-code", "1", str(rs.chart_path)],
+    r = shell.pipe(
+        ["trivy", "config", "--quiet", "--skip-version-check",
+         "--format", "json", "--exit-code", "1", str(rs.chart_path)],
+        ["jq", "-r", _TRIVY_JQ],
         label="static/trivy_config",
     )
     return _from_result("trivy_config", r, cfg.logging.tail_chars)

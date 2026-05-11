@@ -24,7 +24,7 @@ CLI 는 아래 도구들을 shell out 해서 사용함. 없는 도구는 해당 
 | `yamllint` | chart YAML hygiene (pip 의존성으로 자동 포함) |
 | `kubeconform` | k8s 스키마 검증 (`helm template \| kubeconform`) |
 | `hadolint` | Dockerfile lint |
-| `trivy` | chart config scan (선택) |
+| `trivy` | chart config scan (선택) — 출력 요약에 `jq` 필요 |
 | `gitleaks` | 시크릿 스캔 (선택) |
 
 각 도구 설치법은 upstream 문서 참조. Kubeharness 는 설치 스크립트를 동봉하지 않음.

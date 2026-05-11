@@ -85,7 +85,7 @@ cfg.checks.runtime.kubectl_wait.initial_wait_seconds  # int
 - **CLI 미설치 처리** — 예외를 던지는 대신 `exit_code=-1` + stderr `"command not found: X"` 를 반환. 호출자가 exception 핸들링 없이 `skip` 으로 분류할 수 있음.
 - **PATH 보강** — `~/.local/bin` 을 prepend 해서 `pip install --user` 나 언어별 패키지 매니저가 깐 도구를 찾도록 함.
 
-`shell.pipe(a, b)` 는 같은 로깅 규약으로 `a | b` 를 실행함 — `helm template | kubeconform` 에서 사용.
+`shell.pipe(a, b)` 는 같은 로깅 규약으로 `a | b` 를 실행함 — `helm template | kubeconform`, `trivy config --format json | jq` 에서 사용.
 
 ### `static.py`
 
