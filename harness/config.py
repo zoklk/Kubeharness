@@ -64,13 +64,13 @@ class Conventions:
     write_denied_globs: tuple[str, ...]
     registry: str
     image_tag: str
+    build_platforms: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class Environment:
     name: str
     domain_suffix: str
-    arch: str
     node_selectors: dict[str, str] = field(default_factory=dict)
 
 
@@ -131,6 +131,7 @@ class ResolvedService:
     docker_path: Path
     registry: str
     image_tag: str
+    build_platforms: tuple[str, ...]
     _values_file_patterns: tuple[str, ...]
     _active_env: str
 
@@ -180,6 +181,7 @@ class Config:
             docker_path=Path(c.docker_path.format(**subs)),
             registry=c.registry,
             image_tag=c.image_tag,
+            build_platforms=c.build_platforms,
             _values_file_patterns=c.values_files,
             _active_env=self.active_env,
         )
@@ -229,7 +231,10 @@ def _parse(raw: dict, source: Path) -> Config:
             "{workspace}/tests/**",
         ]),
         registry=str(conv_raw.get("registry", "")),
-        image_tag=str(conv_raw.get("image_tag", "dev")),
+        image_tag=str(conv_raw.get("image_tag", "latest")),
+        build_platforms=tuple(
+            conv_raw.get("build_platforms") or ["linux/amd64", "linux/arm64"]
+        ),
     )
 
     env_raw = _require_dict(raw.get("environments", {}), "environments")
@@ -242,7 +247,6 @@ def _parse(raw: dict, source: Path) -> Config:
         environments[name] = Environment(
             name=name,
             domain_suffix=str(body.get("domain_suffix", "cluster.local")),
-            arch=str(body.get("arch", "amd64")),
             node_selectors=dict(body.get("node_selectors") or {}),
         )
     if active_env not in environments:

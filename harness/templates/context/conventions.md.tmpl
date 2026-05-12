@@ -17,10 +17,13 @@
   릴리스 이름에 env 를 인코딩하지 않음.
 - `conventions.label_selector` — 모든 워크로드가 반드시 붙여야 하는
   레이블 (하네스가 `kubectl wait` / `kubectl get pods` 에 사용).
-- `conventions.image_tag` — docker 이미지가 push 되는 태그. 서비스
-  하나가 독립 버전을 갖는 경우에만 차트 안에서 따로 override.
-- `environments.<env>.arch` — 타깃 CPU arch. 하네스가
-  `docker build --platform linux/<arch>` 에 주입함.
+- `conventions.image_tag` — docker 이미지가 push 되는 태그. 자가 빌드
+  이미지는 multi-arch manifest list 라 한 태그에 모든 arch 가 들어감 —
+  서비스 하나가 독립 버전을 갖는 경우에만 차트 안에서 따로 override.
+- `conventions.build_platforms` — 자가 빌드 이미지를 만들 플랫폼 목록
+  (`docker buildx build --platform <list>`). 기본 `["linux/amd64",
+  "linux/arm64"]`. 이미지는 arch-agnostic 이고, env 차이는 도메인/노드/
+  values 에만 둠 (그래서 `environments.<env>` 에 `arch` 가 없음).
 
 이 값들을 차트 파일이나 Dockerfile 에 중복 기재하지 말 것. YAML
 에서 읽거나, 하네스가 주입하도록 둘 것.

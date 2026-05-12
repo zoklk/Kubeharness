@@ -28,12 +28,17 @@ conventions:
   # -f 로 이 순서대로 넘기는 values 파일. {active_env} 는 resolve() 시점 바인딩.
   values_files: ["values.yaml", "values-{active_env}.yaml"]
 
-  # docker 이미지 태그. `<registry>/<service>:<tag>` 로 기록됨.
-  # "latest", git sha, semver 등 원하는 값으로 덮어쓸 것.
-  image_tag: "dev"
+  # docker 이미지 태그. `<registry>/<service>:<tag>` 로 기록됨. 자가 빌드 이미지는
+  # multi-arch manifest list 라 arch 별로 태그가 갈리지 않음 — 중립 태그 권장.
+  # git sha, semver 등 불변 태그로 덮어써도 됨.
+  image_tag: "latest"
+
+  # 자가 빌드 이미지를 만들 플랫폼들 (`docker buildx build --platform <list>`).
+  # 한 태그 안의 manifest list 에 모두 들어가므로 노드는 자기 arch 변종을 알아서 pull.
+  build_platforms: ["linux/amd64", "linux/arm64"]
 
   # TODO(init): docker build/push 대상 레지스트리. 클러스터에서 접근 가능해야 함.
-  # 빈 문자열이면 push 를 생략 (build 만).
+  # 빈 문자열이면 안 됨 — multi-arch 이미지는 빌드 시 곧장 레지스트리로 push 됨.
   registry: "registry.example.local/myproject"
 
   # guard-path.sh 훅과 하네스 정적 체크가 공유하는 쓰기 가드.
@@ -47,16 +52,16 @@ conventions:
 
 environments:
   active: dev
-  # TODO(init): 클러스터에 맞춰 domain_suffix, arch, node_selectors 조정.
+  # TODO(init): 클러스터에 맞춰 domain_suffix, node_selectors 조정.
+  # (arch 는 environments 가 아니라 conventions.build_platforms 에서 정함 — 이미지는
+  #  arch-agnostic 이고, env 차이는 도메인/노드/values 에만 둠.)
   dev:
     domain_suffix: dev.example.local
-    arch: amd64                # `docker build --platform linux/<arch>` 에 사용
     node_selectors:
       storage: node-a
       monitoring: node-b
   prod:
     domain_suffix: cluster.local
-    arch: arm64
     node_selectors:
       storage: node-p1
       monitoring: node-p2

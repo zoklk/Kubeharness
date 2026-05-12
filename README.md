@@ -20,7 +20,7 @@ CLI 는 아래 도구들을 shell out 해서 사용함. 없는 도구는 해당 
 |---|---|
 | `helm` (v3) | chart lint, template, upgrade, uninstall |
 | `kubectl` | 배포 후 wait, pod 조회 |
-| `docker` (+ buildx) | 이미지 build · push |
+| `docker` + `buildx` | 자가 빌드 이미지 multi-arch build · push (아래 "multi-arch 이미지 빌드" 참조) |
 | `yamllint` | chart YAML hygiene (pip 의존성으로 자동 포함) |
 | `kubeconform` | k8s 스키마 검증 (`helm template \| kubeconform`) |
 | `hadolint` | Dockerfile lint |
@@ -38,6 +38,43 @@ CLI 는 아래 도구들을 shell out 해서 사용함. 없는 도구는 해당 
 - `asdf`/`mise` 등 버전 매니저: 각 툴 shim 경로
 
 검사 결과는 `python -m harness verify-static --service <svc>` JSON 응답의 `status` 로 확인.
+
+#### multi-arch 이미지 빌드 (자가 빌드 서비스)
+
+`{workspace}/docker/<service>/Dockerfile` 이 있는 서비스는 `apply` 단계에서
+`docker buildx build --platform <conventions.build_platforms> -t <img> --push`
+한 번으로 빌드+푸시됨 (멀티플랫폼 이미지는 manifest list 라 로컬 `docker load`
+불가 → 곧장 레지스트리로 push). `build_platforms` 는 `config/harness.yaml` 의
+`conventions.build_platforms` 로 조정 (기본 `["linux/amd64", "linux/arm64"]`),
+`conventions.registry` 는 비울 수 없음.
+
+빌드를 돌리는 머신(= `/deploy` 를 실행하는 곳)에 **호스트당 1회** 셋업이 필요함.
+Docker Desktop(맥/윈) 사용자는 이미 다 들어 있으니 건너뛰어도 됨 — 아래는 bare
+리눅스 `docker-ce` 기준:
+
+```bash
+# 0. buildx 플러그인 확인 (없으면: apt install docker-buildx-plugin 등)
+docker buildx version
+
+# 1. 외래 arch 에뮬레이션 핸들러 등록 (privileged — 커널에 등록, 재부팅 전까지 유지)
+docker run --privileged --rm tonistiigi/binfmt --install all
+
+# 2. multi-platform 빌드 가능한 빌더 생성 + 기본으로 지정 (영구)
+docker buildx create --name multiarch --driver docker-container --bootstrap --use
+
+# 확인: platforms 줄에 linux/amd64, linux/arm64 (+ 빌드 대상들) 이 떠야 함
+docker buildx inspect --bootstrap
+```
+
+- 재부팅하면 binfmt 핸들러가 사라질 수 있음 → `docker buildx inspect` 에 외래
+  arch 가 안 보이면 1번만 다시 실행 (영구화하려면 `qemu-user-static` +
+  `binfmt-support` 패키지 또는 systemd 유닛).
+- 빌더 컨테이너(`multiarch`)는 영구임 — 재부팅 후 stopped 여도 `--bootstrap` 이
+  알아서 깨움.
+- 레지스트리 인증은 CLI 가 안 함 — `apply` 전에 셸에서 `docker login <registry>`
+  해 둘 것 (buildx `--push` 가 레지스트리에 직접 쓰므로 빌드 *전* 에 필요).
+- 크로스 arch 빌드는 QEMU 에뮬레이션이라 느림(컴파일 무거우면 체감). 네이티브
+  빌더(원격 arm64 노드)를 `docker buildx create --append` 로 붙이면 빨라짐.
 
 #### kagent (선택)
 

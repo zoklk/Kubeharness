@@ -17,17 +17,21 @@ environments:
   active: dev
   dev:
     domain_suffix: dev.example.local
-    arch: amd64
     node_selectors:
       storage: node-a
       monitoring: node-b
   prod:
     domain_suffix: cluster.local
-    arch: arm64
     node_selectors:
       storage: node-p1
       monitoring: node-p2
 ```
+
+(There is no `arch` per env — self-built images are multi-arch
+manifest lists built for `conventions.build_platforms`, so each node
+pulls its own variant. Don't add `nodeSelector: kubernetes.io/arch`
+to per-env values either; it's redundant with the hostname pin below
+and risks a scheduling conflict.)
 
 ## What belongs in `values-<env>.yaml`
 

@@ -76,12 +76,15 @@ def test_apply_docker_build_push(cfg, docker_dir, stub):
     results = runtime.apply("svc", cfg)
     names = [r.name for r in results]
     assert "docker_build" in names
-    assert "docker_push" in names
+    # buildx --push collapses build+push into one step — no separate docker_push
+    assert "docker_push" not in names
     assert all(r.status == "pass" for r in results)
-    # verify --platform flag was passed
+    # verify it's a multi-arch buildx --push command
     build_cmd = next(cmd for label, cmd in stub.calls if label == "apply/docker_build")
+    assert build_cmd[:3] == ["docker", "buildx", "build"]
     assert "--platform" in build_cmd
-    assert "linux/amd64" in build_cmd
+    assert "linux/amd64,linux/arm64" in build_cmd
+    assert "--push" in build_cmd
 
 
 def test_apply_helm_fresh_install(cfg, helm_chart, stub):
@@ -114,7 +117,7 @@ def test_apply_docker_fail_skips_helm(cfg, tmp_path: Path, monkeypatch, stub):
     results = runtime.apply("svc", cfg)
     names = {r.name: r.status for r in results}
     assert names["docker_build"] == "fail"
-    assert names["docker_push"] == "skip"
+    assert "docker_push" not in names
     assert names.get("helm_install") == "skip"
 
 

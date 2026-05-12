@@ -94,28 +94,28 @@ def _docker_apply(rs: ResolvedService, cfg: Config) -> list[CheckResult]:
             CheckResult(
                 name="docker_build",
                 status="fail",
-                detail="config/harness.yaml: conventions.registry is empty",
+                detail="config/harness.yaml: conventions.registry is empty "
+                       "(multi-arch buildx pushes the manifest list straight to a registry)",
             ),
-            _skip("docker_push"),
         ]
-    arch = cfg.active_environment().arch
     image = _docker_image(rs)
+    platforms = ",".join(rs.build_platforms)
 
+    # One `docker buildx build --push`: a multi-platform image is a manifest
+    # list and cannot be `docker load`-ed locally, so build and push are a
+    # single step. Requires a `docker-container` buildx builder (+ binfmt/QEMU
+    # for foreign arches) — see README "사전 준비".
     build = shell.run(
         [
-            "docker", "build",
-            "--platform", f"linux/{arch}",
+            "docker", "buildx", "build",
+            "--platform", platforms,
             "-t", image,
+            "--push",
             str(rs.docker_path),
         ],
         label="apply/docker_build",
     )
-    build_check = _result_from("docker_build", build, cfg)
-    if build_check.status != "pass":
-        return [build_check, _skip("docker_push")]
-
-    push = shell.run(["docker", "push", image], label="apply/docker_push")
-    return [build_check, _result_from("docker_push", push, cfg)]
+    return [_result_from("docker_build", build, cfg)]
 
 
 # ─── helm ────────────────────────────────────────────────────────────────────
