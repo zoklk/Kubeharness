@@ -27,17 +27,16 @@ MINIMAL_YAML = dedent(
       write_denied_globs: ["{workspace}/tests/**"]
       registry: "registry.test/myns"
       image_tag: "dev"
+      build_platforms: ["linux/amd64", "linux/arm64"]
 
     environments:
       active: dev
       dev:
         domain_suffix: dev.example.local
-        arch: amd64
         node_selectors:
           storage: node-a
       prod:
         domain_suffix: cluster.local
-        arch: arm64
         node_selectors:
           storage: node-p
 

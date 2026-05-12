@@ -112,7 +112,7 @@ DOCKER_CHECKS = {hadolint, gitleaks_docker}
 
 **`apply(service, cfg)`** — 배포 흐름:
 
-1. `docker/<svc>/Dockerfile` 존재 시: `docker build --platform linux/{arch}` (arch 는 active env 에서) → `docker push`. build 실패 시 중단, 이후 단계는 `skip`.
+1. `docker/<svc>/Dockerfile` 존재 시: `docker buildx build --platform <conventions.build_platforms> -t <img> --push <docker_path>` — multi-arch manifest list 라 build+push 가 한 명령(멀티플랫폼 이미지는 로컬 `docker load` 불가, 곧장 레지스트리로 push). `conventions.registry` 가 비면 이 단계는 `fail`. build 실패 시 중단, 이후 단계는 `skip`. 호스트에 `docker-container` buildx 빌더(+ 외래 arch 용 binfmt/QEMU)가 있어야 함 — README "사전 준비" 참조.
 2. `helm/<svc>/` 존재 시:
    a. `helm status <release> -n <ns>` 로 기존 릴리스 감지.
    b. 존재하면 `helm uninstall` 먼저. 이전 chart 에 immutable field(예: `spec.selector`)가 있어 `helm upgrade` 가 거부하는 흔한 케이스를 처리함. clean uninstall 후 install 이 가장 단순한 결정적 해법.
@@ -257,7 +257,7 @@ deploy-orchestrator  (subagent — LLM 이 여기 살아있음)
 
 ### 새 environment 추가
 
-1. `config/harness.yaml` 의 `environments.<env>: {domain_suffix, arch, node_selectors}` 에 추가.
+1. `config/harness.yaml` 의 `environments.<env>: {domain_suffix, node_selectors}` 에 추가. (빌드 arch 는 env 가 아니라 `conventions.build_platforms` 에서 정함 — 이미지는 arch-agnostic 이고 env 차이는 도메인/노드/values 에만 둠.)
 2. `environments.active` 를 새 env 로 세팅(또는 CLI 플래그로 넘김 — refactor.md §20 에 따라 아직 미구현).
 3. 각 chart 에 `values-<env>.yaml` 을 추가.
 

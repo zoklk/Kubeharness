@@ -13,8 +13,8 @@ agent **when to use what**.
    through `python -m harness <subcommand>`. The CLI owns timeouts, release
    naming, session logging, and uninstall-before-upgrade.
 2. **Configuration is `config/harness.yaml`.** Never hardcode namespace,
-   workspace path, release name, image tag, or arch in code or skills.
-   Read the YAML at runtime.
+   workspace path, release name, image tag, or build platforms in code or
+   skills. Read the YAML at runtime.
 3. **Workspace writes only.** Code and artifacts go in `{{workspace_dir}}/`.
    `harness/`, `.claude/`, `config/`, `context/`, `docs/` are off-limits —
    the hook will block writes regardless.

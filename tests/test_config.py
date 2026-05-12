@@ -23,6 +23,7 @@ def test_resolve_substitutes_service_and_env(cfg):
     assert rs.docker_path == Path("ws/docker/prometheus")
     assert rs.registry == "registry.test/myns"
     assert rs.image_tag == "dev"
+    assert rs.build_platforms == ("linux/amd64", "linux/arm64")
 
 
 def test_resolve_values_files_bind_active_env(cfg):
@@ -33,7 +34,6 @@ def test_resolve_values_files_bind_active_env(cfg):
 def test_env_lookup(cfg):
     dev = cfg.env("dev")
     assert dev.domain_suffix == "dev.example.local"
-    assert dev.arch == "amd64"
     assert dev.node_selectors["storage"] == "node-a"
 
 
@@ -74,7 +74,7 @@ def test_invalid_active_env_raises(tmp_path: Path):
         "conventions: {workspace_dir: ws}\n"
         "environments:\n"
         "  active: staging\n"  # not defined below
-        "  dev: {domain_suffix: d, arch: amd64}\n"
+        "  dev: {domain_suffix: d}\n"
         "checks:\n"
         "  static: {}\n"
         "  runtime:\n"
@@ -95,7 +95,7 @@ def test_defaults_fill_when_fields_missing(tmp_path: Path):
         "conventions: {workspace_dir: ws, registry: r}\n"
         "environments:\n"
         "  active: dev\n"
-        "  dev: {domain_suffix: d, arch: amd64}\n"
+        "  dev: {domain_suffix: d}\n"
         "checks:\n"
         "  static: {}\n"
         "  runtime:\n"
@@ -108,6 +108,7 @@ def test_defaults_fill_when_fields_missing(tmp_path: Path):
     c = load_config(minimal)
     # Defaults from refactor.md §9 kick in
     assert c.conventions.release_name == "{service}"
-    assert c.conventions.image_tag == "dev"
+    assert c.conventions.image_tag == "latest"
+    assert c.conventions.build_platforms == ("linux/amd64", "linux/arm64")
     assert c.checks.runtime.kubectl_wait.initial_wait_seconds == 60
     assert c.checks.runtime.kubectl_wait.terminal_grace_seconds == 240

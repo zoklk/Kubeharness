@@ -30,21 +30,30 @@ when `Dockerfile` exists at this path.
 
 ## Build + push flow (handled by the CLI)
 
-The CLI assembles:
+The CLI assembles one multi-arch `buildx` command (build and push are a
+single step — a multi-platform image is a manifest list and can't be
+loaded into the local docker, so it goes straight to the registry):
 
 ```
-docker build \
-  --platform linux/<arch-from-active-env> \
+docker buildx build \
+  --platform <conventions.build_platforms joined by ",">  \
   -t <registry>/<service>:<image-tag> \
+  --push \
   {{workspace_dir}}/docker/<service>
-docker push <registry>/<service>:<image-tag>
 ```
 
 - `registry` ← `conventions.registry` in `config/harness.yaml`
-- `arch` ← `environments.<active>.arch`
+- `build_platforms` ← `conventions.build_platforms` (default `linux/amd64,linux/arm64`)
 - `image-tag` ← `conventions.image_tag`
 
-You do not invoke docker yourself. You only write the Dockerfile.
+You do not invoke docker yourself. You only write the Dockerfile — and
+it must build cleanly on **every** platform in `build_platforms` (no
+arch-specific binary downloads without a `TARGETARCH` switch; `buildx`
+provides `TARGETPLATFORM`/`TARGETARCH`/`TARGETOS` build args).
+
+> The machine running `/deploy` needs a `docker-container` buildx
+> builder (+ binfmt/QEMU for foreign arches) — a one-time host setup.
+> See the project README "사전 준비".
 
 ## Multi-stage template
 
@@ -93,8 +102,9 @@ Do not add global suppressions to the repo root.
 
 ## Registry & push
 
-- `conventions.registry` must be set and reachable by the cluster.
-- Empty string disables push (build only) — useful for smoke tests
-  but never for a real deploy.
+- `conventions.registry` must be set and reachable by the cluster — a
+  multi-arch `buildx --push` pushes the manifest list straight to the
+  registry, so an empty `registry` is a hard error (the docker stage
+  fails), not "build only".
 - The CLI does not log into the registry. Configure credentials in
-  your shell environment before running `/deploy`.
+  your shell environment before running `/deploy` (`docker login …`).
