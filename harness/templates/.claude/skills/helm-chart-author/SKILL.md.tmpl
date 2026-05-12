@@ -99,6 +99,53 @@ Before writing `image.repository`, check whether
 If you are unsure which mode a service uses, check for the presence
 of `{{workspace_dir}}/docker/<service>/Dockerfile` before editing.
 
+## Patching a vendored subchart (post-render)
+
+When this chart pulls an upstream chart as a `dependencies:` entry and
+that subchart's rendered manifest needs a tweak it exposes no value
+for (the classic case: a Reloader annotation —
+`reloader.stakater.com/auto` or `configmap.reloader.stakater.com/reload`
+— on the upstream `Deployment`/`StatefulSet` `metadata.annotations`,
+which Reloader reads from the workload object, not the pod template),
+**do not hand-edit the vendored `charts/*.tgz`**. Drop a post-renderer
+into the chart directory:
+
+```
+{{workspace_dir}}/helm/<service>/
+├── Chart.yaml
+├── post-render.sh          # executable — `chmod +x`
+└── kustomization.yaml
+```
+
+```sh
+# post-render.sh
+#!/bin/sh
+set -e
+d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+cat > "$d/all.yaml"
+cp "$(dirname "$0")/kustomization.yaml" "$d/"
+kubectl kustomize "$d"
+```
+
+```yaml
+# kustomization.yaml
+resources: [all.yaml]
+patches:
+  - target: { group: apps, version: v1, kind: StatefulSet, name: <upstream-name> }
+    patch: |
+      - op: add
+        path: /metadata/annotations/configmap.reloader.stakater.com~1reload
+        value: <configmap-name>
+```
+
+The harness auto-detects an executable file named per
+`conventions.post_render_script` (default `post-render.sh`) and adds
+`--post-renderer <abs path>` to `helm template`, `helm upgrade --install`,
+and `helm upgrade --dry-run=server` — so kubeconform / dry-run validate
+the patched output too. Nothing to wire up; if the file isn't there (or
+isn't executable) it's a no-op. Prefer real chart values whenever the
+subchart offers them — reach for this only when it genuinely doesn't.
+
 ## Kubeconform / yamllint cleanliness
 
 - Keep `apiVersion`, `kind`, `metadata` at the top of every manifest.
@@ -113,9 +160,10 @@ of `{{workspace_dir}}/docker/<service>/Dockerfile` before editing.
 - `yamllint` (excludes `templates/`)
 - `helm lint` with all `values.yaml` + `values-<active_env>.yaml` passed via `-f`
 - `helm template … | kubeconform -strict -ignore-missing-schemas`
+  (+ `--post-renderer` if a `post-render.sh` is present — see above)
 - `trivy config` on the chart directory
 - `gitleaks detect` on the chart directory
-- `helm upgrade --install --dry-run=server` (needs cluster)
+- `helm upgrade --install --dry-run=server` (needs cluster; also `--post-renderer` aware)
 
 The PostToolUse hook runs only `yamllint` on the single touched file
 for fast feedback; the full suite runs at `/deploy` time.

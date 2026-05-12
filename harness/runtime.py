@@ -149,6 +149,7 @@ def _helm_apply(rs: ResolvedService, cfg: Config) -> list[CheckResult]:
         "-n", rs.namespace,
         "--create-namespace",
         "--timeout", "180s",
+        *rs.post_renderer_args(),
         *_values_args(rs),
     ]
     up = shell.run(upgrade_cmd, label="apply/helm_install")
@@ -205,6 +206,7 @@ def _chart_workload_classes(rs: ResolvedService, cfg: Config) -> tuple[bool, boo
     cmd = [
         "helm", "template", rs.release_name, str(rs.chart_path),
         "-n", rs.namespace,
+        *rs.post_renderer_args(),
         *_values_args(rs),
     ]
     r = shell.run(cmd, label="verify-runtime/helm_template", log_stdout=False)

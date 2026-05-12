@@ -59,6 +59,7 @@ cfg = load_config()                             # @lru_cache
 cfg.resolve("prometheus").release_name          # "prometheus"
 cfg.resolve("prometheus").chart_path            # Path("workspace/helm/prometheus")
 cfg.resolve("prometheus").values_files()        # [Path("values.yaml"), Path("values-dev.yaml")]
+cfg.resolve("prometheus").post_renderer_args()  # ["--post-renderer", "<abs>/post-render.sh"] | []
 cfg.env("dev").domain_suffix                    # environments.dev 에서
 cfg.active_environment()                        # 축약 — env(cfg.active_env)
 cfg.smoke_test_path("svc", "p1")                # Path("workspace/tests/p1/smoke-test-svc.sh")
@@ -69,6 +70,8 @@ cfg.checks.runtime.kubectl_wait.initial_wait_seconds  # int
 여기서 풀리는 치환 토큰: `{service}`, `{active_env}`, `{workspace}`, `{phase}`.
 
 기본값(refactor.md §9): YAML 이 `release_name`, `image_tag`, `kubectl_wait.initial_wait_seconds` 등을 생략하면 기본값이 채워짐. `config.py` 의 `_parse` 참조.
+
+**Post-render hook.** chart 디렉토리에 `conventions.post_render_script`(기본 `post-render.sh`) 이름의 *실행 가능한* 파일이 있으면 모든 helm 렌더 호출(`helm template` ·`upgrade --install` ·`--dry-run=server`)에 `--post-renderer <abs path>` 가 붙음 — 없으면 무시(`Dockerfile` 과 같은 detection-gate). 직접 못 고치는 벤더드 서브차트의 렌더 산출물을 패치하기 위한 탈출구(예: 업스트림 StatefulSet `metadata` 에 Reloader annotation 주입). 보통 `kustomize build` 를 부르는 짧은 래퍼 + `kustomization.yaml`. `helm lint` 는 `--post-renderer` 미지원이라 chart 소스만 봄.
 
 ### `shell.py`
 

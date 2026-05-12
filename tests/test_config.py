@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -20,10 +21,51 @@ def test_resolve_substitutes_service_and_env(cfg):
     assert rs.release_name == "prometheus"
     assert rs.label_selector == "app.kubernetes.io/name=prometheus"
     assert rs.chart_path == Path("ws/helm/prometheus")
+    assert rs.post_render_script == Path("ws/helm/prometheus/post-render.sh")
     assert rs.docker_path == Path("ws/docker/prometheus")
     assert rs.registry == "registry.test/myns"
     assert rs.image_tag == "dev"
     assert rs.build_platforms == ("linux/amd64", "linux/arm64")
+
+
+def test_post_renderer_args_absent_when_no_script(cfg, tmp_path: Path):
+    chart = tmp_path / "ws" / "helm" / "prometheus"
+    chart.mkdir(parents=True)
+    assert cfg.resolve("prometheus").post_renderer_args() == []
+
+
+def test_post_renderer_args_present_when_executable_script(cfg, tmp_path: Path):
+    chart = tmp_path / "ws" / "helm" / "prometheus"
+    chart.mkdir(parents=True)
+    script = chart / "post-render.sh"
+    script.write_text("#!/bin/sh\ncat\n")
+    # not executable yet → ignored
+    assert cfg.resolve("prometheus").post_renderer_args() == []
+    script.chmod(0o755)
+    args = cfg.resolve("prometheus").post_renderer_args()
+    assert args[0] == "--post-renderer"
+    assert Path(args[1]) == script.resolve()
+    assert os.path.isabs(args[1])
+
+
+def test_post_render_script_disabled_by_empty_string(tmp_path: Path):
+    bad = tmp_path / "h.yaml"
+    bad.write_text(
+        "cluster: {namespace: x}\n"
+        "conventions: {workspace_dir: ws, registry: r, post_render_script: ''}\n"
+        "environments:\n  active: dev\n  dev: {domain_suffix: d}\n"
+        "checks:\n  static: {}\n  runtime:\n    kubectl_wait: {}\n"
+        "logging: {dir: logs, tail_chars: 100, retention_days: 7}\n"
+        "orchestration: {max_runtime_retries: 3}\n",
+        encoding="utf-8",
+    )
+    load_config.cache_clear()
+    c = load_config(bad)
+    rs = c.resolve("prometheus")
+    # chart_path / "" == chart_path (a dir) → never a file → no --post-renderer
+    assert rs.post_render_script == Path("ws/helm/prometheus")
+    (tmp_path / "ws" / "helm" / "prometheus").mkdir(parents=True)
+    assert rs.post_renderer_args() == []
 
 
 def test_resolve_values_files_bind_active_env(cfg):

@@ -105,6 +105,39 @@ def test_apply_helm_uninstall_when_release_exists(cfg, helm_chart, stub):
     assert "apply/helm_install" in labels
 
 
+def _add_post_render_script(chart: Path) -> Path:
+    script = chart / "post-render.sh"
+    script.write_text("#!/bin/sh\ncat\n")
+    script.chmod(0o755)
+    return script
+
+
+def test_apply_helm_install_adds_post_renderer_when_script_present(cfg, helm_chart, stub):
+    script = _add_post_render_script(helm_chart)
+    stub.set("apply/helm_status", exit_code=1)
+    runtime.apply("svc", cfg)
+    install_cmd = next(cmd for label, cmd in stub.calls if label == "apply/helm_install")
+    assert "--post-renderer" in install_cmd
+    assert install_cmd[install_cmd.index("--post-renderer") + 1] == str(script.resolve())
+    # must come before the -f value files (helm flag-order tolerant, but keep it tidy)
+    assert install_cmd.index("--post-renderer") < install_cmd.index("-f")
+
+
+def test_apply_helm_install_no_post_renderer_when_script_absent(cfg, helm_chart, stub):
+    stub.set("apply/helm_status", exit_code=1)
+    runtime.apply("svc", cfg)
+    install_cmd = next(cmd for label, cmd in stub.calls if label == "apply/helm_install")
+    assert "--post-renderer" not in install_cmd
+
+
+def test_apply_helm_install_ignores_non_executable_post_render_script(cfg, helm_chart, stub):
+    (helm_chart / "post-render.sh").write_text("#!/bin/sh\ncat\n")  # no chmod +x
+    stub.set("apply/helm_status", exit_code=1)
+    runtime.apply("svc", cfg)
+    install_cmd = next(cmd for label, cmd in stub.calls if label == "apply/helm_install")
+    assert "--post-renderer" not in install_cmd
+
+
 def test_apply_docker_fail_skips_helm(cfg, tmp_path: Path, monkeypatch, stub):
     # set up both helm and docker
     monkeypatch.chdir(tmp_path)
@@ -203,6 +236,16 @@ def test_verify_runtime_kubectl_wait_pass(cfg, helm_chart, stub):
     results = runtime.verify_runtime("svc", cfg)
     kw = next(r for r in results if r.name == "kubectl_wait")
     assert kw.status == "pass"
+
+
+def test_verify_runtime_helm_template_uses_post_renderer(cfg, helm_chart, stub):
+    script = _add_post_render_script(helm_chart)
+    stub.set("verify-runtime/helm_template", stdout=_DEPLOY_YAML)
+    stub.set("verify-runtime/kubectl_wait", exit_code=0)
+    runtime.verify_runtime("svc", cfg)
+    tmpl_cmd = next(cmd for label, cmd in stub.calls if label == "verify-runtime/helm_template")
+    assert "--post-renderer" in tmpl_cmd
+    assert tmpl_cmd[tmpl_cmd.index("--post-renderer") + 1] == str(script.resolve())
 
 
 def test_verify_runtime_helm_template_failure_waits_conservatively(cfg, helm_chart, stub):
