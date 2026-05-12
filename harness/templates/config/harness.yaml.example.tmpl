@@ -28,6 +28,14 @@ conventions:
   # -f 로 이 순서대로 넘기는 values 파일. {active_env} 는 resolve() 시점 바인딩.
   values_files: ["values.yaml", "values-{active_env}.yaml"]
 
+  # chart 디렉토리 기준 post-render 스크립트 경로 (helm `--post-renderer`).
+  # 이 이름의 *실행 가능한* 파일이 chart 디렉토리에 있으면 helm template/upgrade/
+  # dry-run 에 자동으로 `--post-renderer <abs path>` 가 붙음 — 없으면 무시됨.
+  # 용도: 직접 못 고치는 벤더드 서브차트의 렌더 산출물 패치 (예: 업스트림
+  # StatefulSet metadata 에 Reloader annotation 주입). 보통 kustomize 래퍼.
+  # 빈 문자열이면 비활성.
+  post_render_script: "post-render.sh"
+
   # docker 이미지 태그. `<registry>/<service>:<tag>` 로 기록됨. 자가 빌드 이미지는
   # multi-arch manifest list 라 arch 별로 태그가 갈리지 않음 — 중립 태그 권장.
   # git sha, semver 등 불변 태그로 덮어써도 됨.

@@ -60,6 +60,7 @@ class Conventions:
     release_name: str
     label_selector: str
     values_files: tuple[str, ...]
+    post_render_script: str
     write_allowed_globs: tuple[str, ...]
     write_denied_globs: tuple[str, ...]
     registry: str
@@ -128,6 +129,7 @@ class ResolvedService:
     release_name: str
     label_selector: str
     chart_path: Path
+    post_render_script: Path
     docker_path: Path
     registry: str
     image_tag: str
@@ -141,6 +143,20 @@ class ResolvedService:
             Path(pat.format(active_env=self._active_env))
             for pat in self._values_file_patterns
         ]
+
+    def post_renderer_args(self) -> list[str]:
+        """``['--post-renderer', <abs path>]`` if the chart ships an executable
+        post-render script at ``conventions.post_render_script``, else ``[]``.
+
+        Lets a chart patch the rendered manifests of a vendored subchart it
+        can't edit (e.g. inject a Reloader annotation onto an upstream
+        StatefulSet) — see ``helm-chart-author`` skill. Detection-gated like
+        ``Dockerfile``: drop the file in and ``chmod +x`` it; nothing else.
+        """
+        pr = self.post_render_script
+        if pr.is_file() and os.access(pr, os.X_OK):
+            return ["--post-renderer", str(pr.resolve())]
+        return []
 
 
 @dataclass(frozen=True)
@@ -172,12 +188,14 @@ class Config:
             "service": service,
             "active_env": self.active_env,
         }
+        chart_path = Path(c.chart_path.format(**subs))
         return ResolvedService(
             service=service,
             namespace=self.cluster.namespace,
             release_name=c.release_name.format(**subs),
             label_selector=c.label_selector.format(**subs),
-            chart_path=Path(c.chart_path.format(**subs)),
+            chart_path=chart_path,
+            post_render_script=chart_path / c.post_render_script.format(**subs),
             docker_path=Path(c.docker_path.format(**subs)),
             registry=c.registry,
             image_tag=c.image_tag,
@@ -223,6 +241,7 @@ def _parse(raw: dict, source: Path) -> Config:
         release_name=str(conv_raw.get("release_name", "{service}")),
         label_selector=str(conv_raw.get("label_selector", "app.kubernetes.io/name={service}")),
         values_files=tuple(conv_raw.get("values_files") or ["values.yaml", "values-{active_env}.yaml"]),
+        post_render_script=str(conv_raw.get("post_render_script", "post-render.sh")),
         write_allowed_globs=tuple(conv_raw.get("write_allowed_globs") or [
             "{workspace}/helm/**",
             "{workspace}/docker/**",

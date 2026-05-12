@@ -156,3 +156,21 @@ def test_values_files_are_passed_to_helm_lint(cfg, helm_chart, stub):
     joined = " ".join(helm_lint_calls[0])
     assert "values.yaml" in joined
     assert "values-dev.yaml" in joined
+
+
+def test_kubeconform_uses_post_renderer_when_script_present(cfg, helm_chart, stub):
+    script = helm_chart / "post-render.sh"
+    script.write_text("#!/bin/sh\ncat\n")
+    script.chmod(0o755)
+    static.run_static("svc", cfg)
+    tmpl_calls = [c for c in stub.calls if c and c[:2] == ["helm", "template"]]
+    assert tmpl_calls
+    assert "--post-renderer" in tmpl_calls[0]
+    assert tmpl_calls[0][tmpl_calls[0].index("--post-renderer") + 1] == str(script.resolve())
+
+
+def test_kubeconform_no_post_renderer_when_script_absent(cfg, helm_chart, stub):
+    static.run_static("svc", cfg)
+    tmpl_calls = [c for c in stub.calls if c and c[:2] == ["helm", "template"]]
+    assert tmpl_calls
+    assert "--post-renderer" not in tmpl_calls[0]

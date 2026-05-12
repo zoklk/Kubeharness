@@ -114,6 +114,7 @@ def check_kubeconform(rs: ResolvedService, cfg: Config) -> CheckResult:
     helm_cmd = [
         "helm", "template", rs.release_name, str(rs.chart_path),
         "-n", rs.namespace,
+        *rs.post_renderer_args(),
         *_values_args(rs),
     ]
     kcf_cmd = ["kubeconform", "-strict", "-summary", "-ignore-missing-schemas", "-"]
@@ -154,6 +155,7 @@ def check_helm_dry_run_server(rs: ResolvedService, cfg: Config) -> CheckResult:
         "helm", "upgrade", "--install", rs.release_name, str(rs.chart_path),
         "-n", rs.namespace,
         "--dry-run=server",
+        *rs.post_renderer_args(),
         *_values_args(rs),
     ]
     r = shell.run(cmd, label="static/helm_dry_run_server")
